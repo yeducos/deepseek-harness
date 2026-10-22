@@ -562,6 +562,37 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'chatBridgeBinder',
+    summary: 'Durable chat-bridge room bindings that wake bound Sessions.',
+    description: 'Durable chat-bridge room bindings that wake bound Sessions.\n\n`sessionPersistence` is a load-order requirement rather than a directly called service: a wake commits only when `ctx.sessions.flush()` reports that a `session/flush` listener participated, and the persistence backend providing this service is the plugin that registers that listener.',
+    methods: [
+      {
+        signature: '@Remote async list(): Promise<readonly BindingView[]>',
+        description: 'List every binding this Host holds, declared or runtime.',
+        parameters: [],
+        returns: 'bindings without room credentials, ordered by Session id.',
+      },
+      {
+        signature: '@Remote async rooms(): Promise<RoomListResult>',
+        description: 'Read the public room list for the binding form. The listing carries no credential, so it locates rooms without joining any of them.',
+        parameters: [],
+        returns: 'the public rooms, or that the room service was unreachable.',
+      },
+      {
+        signature: '@Remote async bind(request: BindRequest): Promise<BindResult>',
+        description: 'Bind one live Session to a room and start watching it. The room handshake runs before anything durable changes, so a wrong credential leaves the existing binding untouched.',
+        parameters: [{ name: 'request', description: 'Session, room credential, optional name and wake scope.' }],
+        returns: 'the new binding, or the refusal category.',
+      },
+      {
+        signature: '@Remote async unbind(request: UnbindRequest): Promise<UnbindResult>',
+        description: 'Remove one runtime binding and stop watching its room.',
+        parameters: [{ name: 'request', description: 'Session whose runtime binding is removed.' }],
+        returns: 'whether a row was removed, or that declarations own the binding.',
+      },
+    ],
+  },
+  {
     key: 'claudeCodeMods',
     summary: 'The bridge service: loaded mods, their hooks, and the harness listeners that raise their events.',
     description: 'The bridge service: loaded mods, their hooks, and the harness listeners that raise their events. Mods join through ClaudeCodeMods.add, which defineMod calls when a mod plugin mounts. The Remote methods let a Client draw each session\'s band above the prompt and press its buttons.',
@@ -4962,6 +4993,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BashEnvVariableInfo extends BashEnvVariable {\n    contributor: string;\n    key: DshEnvironmentKey;\n}',
   },
   {
+    name: 'BindFailureCode',
+    declaration: 'export type BindFailureCode = \'session-unknown\' | \'invalid-cookie\' | \'invalid-name\' | \'declared-binding\' | \'room-unreachable\' | \'room-rejected\';',
+  },
+  {
+    name: 'BindingSource',
+    declaration: 'export type BindingSource = \'declared\' | \'runtime\';',
+  },
+  {
+    name: 'BindingView',
+    declaration: 'export interface BindingView {\n    readonly sessionId: string;\n    readonly agentName: string;\n    readonly since: number;\n    readonly status: \'active\' | \'stopped\';\n    readonly wake: WakeMode;\n    readonly source: BindingSource;\n}',
+  },
+  {
+    name: 'BindRequest',
+    declaration: 'export interface BindRequest {\n    readonly sessionId: string;\n    readonly cookie: string;\n    readonly agentName?: string;\n    readonly wake?: WakeMode;\n}',
+  },
+  {
+    name: 'BindResult',
+    declaration: 'export type BindResult = {\n    readonly ok: true;\n    readonly binding: BindingView;\n} | {\n    readonly ok: false;\n    readonly code: BindFailureCode;\n};',
+  },
+  {
     name: 'BoxProps',
     declaration: 'export interface BoxProps {\n    readonly flexDirection?: \'row\' | \'column\' | undefined;\n    readonly paddingX?: number | undefined;\n    readonly paddingY?: number | undefined;\n    readonly padding?: number | undefined;\n    readonly gap?: number | undefined;\n    readonly border?: boolean | string | undefined;\n    readonly borderColor?: string | undefined;\n    readonly children?: UiNode | undefined;\n}',
   },
@@ -6826,6 +6877,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly parentAgent?: Agent;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'RoomListResult',
+    declaration: 'export type RoomListResult = {\n    readonly ok: true;\n    readonly rooms: readonly RoomSummary[];\n} | {\n    readonly ok: false;\n    readonly code: \'room-unreachable\';\n};',
+  },
+  {
+    name: 'RoomSummary',
+    declaration: 'export interface RoomSummary {\n    readonly roomId: string;\n    readonly name: string;\n    readonly members: number;\n    readonly messages: number;\n}',
+  },
+  {
     name: 'RpcId',
     declaration: 'export type RpcId = Branded<\'rpc-id\'>;',
   },
@@ -8542,6 +8601,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type UiRenderResult = UiNode;',
   },
   {
+    name: 'UnbindRequest',
+    declaration: 'export interface UnbindRequest {\n    readonly sessionId: string;\n}',
+  },
+  {
+    name: 'UnbindResult',
+    declaration: 'export type UnbindResult = {\n    readonly ok: true;\n    readonly removed: boolean;\n} | {\n    readonly ok: false;\n    readonly code: \'declared-binding\';\n};',
+  },
+  {
     name: 'UpdateTeamTaskRequest',
     declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n}',
   },
@@ -8552,6 +8619,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'VerifiedWebhookDelivery',
     declaration: 'export interface VerifiedWebhookDelivery<K extends string = string> {\n    readonly kind: K;\n    readonly source: WebhookSourceId;\n    readonly deliveryId: WebhookDeliveryId;\n    readonly event: WebhookEventOf<K>;\n    readonly receivedAt: number;\n}',
+  },
+  {
+    name: 'WakeMode',
+    declaration: 'export type WakeMode = \'idle-only\' | \'always\';',
   },
   {
     name: 'WebBootBatch',

@@ -1,0 +1,55 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/experimental/chat-bridge-binder/README.md
+/:
+  en: 32423c237dafac6c
+  zh: bf0d91ef4094caaf
+/deepseek-ai-dsh-experimental-chat-bridge-binder:
+  en: 12e2a2afdfab86c3
+  zh: d1b389d3415da630
+/deepseek-ai-dsh-experimental-chat-bridge-binder/summary:
+  en: 6a439252ec0355aa
+  zh: baef35ef8323c6c9
+/deepseek-ai-dsh-experimental-chat-bridge-binder/table-of-contents:
+  en: fc3a62323482bc13
+  zh: e4fd574beec8d80d
+/deepseek-ai-dsh-experimental-chat-bridge-binder/bindings:
+  en: cccba9b6972415f2
+  zh: c3e5694300f9a1a1
+/deepseek-ai-dsh-experimental-chat-bridge-binder/poll-loop:
+  en: 15aa734224daef83
+  zh: b53f4ee0ca470c0a
+/deepseek-ai-dsh-experimental-chat-bridge-binder/wake-delivery:
+  en: c272c933d84c7c6c
+  zh: bbbb25d65d5142ad
+/deepseek-ai-dsh-experimental-chat-bridge-binder/room-read-only-boundary:
+  en: c227a268ff96c8dd
+  zh: a7b3adad2c13eba2
+/deepseek-ai-dsh-experimental-chat-bridge-binder/composition:
+  en: 35a1b149ec90fcd4
+  zh: 1f62603845f3de49
+/deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience/idle-wake-followup-message:
+  en: b9e9472c4ad7311d
+  zh: 80120065e86bc86c
+/deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience/idle-wake-followup-message/what-the-model-sees:
+  en: 757b3acb60150a62
+  zh: 9294b4745f64a773
+/deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience/idle-wake-followup-message/what-the-model-sees/verbatim-text-for-this-field-when-needed:
+  en: efa45d5438560dbd
+  zh: 74d5cc8c2d6c69dd
+/deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience/idle-wake-followup-message/token-effect:
+  en: c9f812fef0805fe8
+  zh: 2ff7040c5e170254
+/deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience/idle-wake-followup-message/kv-cache-effect:
+  en: 91276e5799ff1b21
+  zh: cc8f5136b0a6bbea
+/deepseek-ai-dsh-experimental-chat-bridge-binder/known-limitations-and-deferred-work:
+  en: 48cca5087be02896
+  zh: e2a3dd54a0f8bc97
+/deepseek-ai-dsh-experimental-chat-bridge-binder/known-limitations-and-deferred-work/dev-note:
+  en: fd328e37e54f90d6
+  zh: b4613d2024d4a93a
