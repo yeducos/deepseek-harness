@@ -127,12 +127,20 @@
 
 .roomRow {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
   padding: 5px 8px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-sm);
   background: var(--dsw-alias-bg-l1);
+}
+
+.roomBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .roomName {
@@ -170,6 +178,12 @@
   flex-direction: column;
   gap: 4px;
   margin: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .fact {

@@ -55,6 +55,12 @@ export interface Config {
 export type BindingSource = 'declared' | 'runtime'
 
 /**
+ * Whether a binding is watching its room. `left` records that the bound member
+ * left the room; the binding survives so the Session can rejoin later.
+ */
+export type BindingStatus = 'active' | 'stopped' | 'left'
+
+/**
  * One binding as the runtime API reports it. The room cookie stays in the
  * durable row and in connection headers; it never appears here.
  */
@@ -66,7 +72,7 @@ export interface BindingView {
   /** Cursor the next poll starts from. */
   readonly since: number
   /** Whether the binding is currently watching the room. */
-  readonly status: 'active' | 'stopped'
+  readonly status: BindingStatus
   /** Wake scope. */
   readonly wake: WakeMode
   /** Declaration source. */
@@ -81,6 +87,8 @@ export interface BindRequest {
   readonly cookie: string
   /** Existing room name to rejoin; omission applies for one. */
   readonly agentName?: string
+  /** Access key a private room requires for the first join. */
+  readonly accessKey?: string
   /** Wake scope for this binding (default `idle-only`). */
   readonly wake?: WakeMode
 }
@@ -109,6 +117,73 @@ export interface UnbindRequest {
 export type UnbindResult =
   | { readonly ok: true; readonly removed: boolean }
   | { readonly ok: false; readonly code: 'declared-binding' }
+
+/** Resolve one invite link, room id, or room cookie into a joinable room. */
+export interface ResolveRequest {
+  /** WebUI invite URL, room id (prefix allowed), or room cookie. */
+  readonly value: string
+  /** Access key for a private room; an invite URL's key parameter also works. */
+  readonly accessKey?: string
+}
+
+/** One room the resolver located, including the credential the bind needs. */
+export interface ResolvedRoom {
+  /** Stable room id; a room cookie hashes to this value. */
+  readonly roomId: string
+  /** Room name, or the server's placeholder when it was never named. */
+  readonly name: string
+  /** Room type as the server reports it. */
+  readonly roomType: 'public' | 'private'
+  /** Room credential; used for the bind handshake and never reported in a binding view. */
+  readonly cookie: string
+  /** Access key the invite link carried, when the request did not already supply one. */
+  readonly accessKey?: string
+}
+
+/** Why resolving a room reference was refused. */
+export type ResolveFailureCode =
+  | 'invalid-value'
+  | 'room-unknown'
+  | 'room-private'
+  | 'room-unreachable'
+  | 'resolution-unsupported'
+
+/** Room-resolution outcome for the binding form. */
+export type ResolveResult =
+  | { readonly ok: true; readonly room: ResolvedRoom }
+  | { readonly ok: false; readonly code: ResolveFailureCode }
+
+/** Remove the bound member from its room while keeping the binding. */
+export interface LeaveRequest {
+  /** Session whose bound member leaves the room. */
+  readonly sessionId: string
+}
+
+/** Leave-room outcome; the binding row survives with status `left`. */
+export type LeaveResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: 'session-unknown' | 'not-bound' | 'room-unreachable' }
+
+/** Re-enter the room of a binding whose member left it. */
+export interface RejoinRequest {
+  /** Session whose binding re-enters its room. */
+  readonly sessionId: string
+  /** Fresh access key a private room requires for a member that already left. */
+  readonly accessKey?: string
+}
+
+/** Why re-entering a room was refused. */
+export type RejoinFailureCode =
+  | 'session-unknown'
+  | 'not-bound'
+  | 'not-left'
+  | 'room-unreachable'
+  | 'room-rejected'
+
+/** Re-enter outcome. */
+export type RejoinResult =
+  | { readonly ok: true; readonly binding: BindingView }
+  | { readonly ok: false; readonly code: RejoinFailureCode }
 
 /** One public chat-bridge room as `list_rooms` reports it; no credential is included. */
 export interface RoomSummary {

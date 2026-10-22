@@ -29,8 +29,16 @@ function props(
   bind: BindingActionProps['bind'] = async () => ({ ok: false, code: 'room-rejected' }),
   unbind: BindingActionProps['unbind'] = async () => ({ ok: true, removed: false }),
   rooms: BindingActionProps['rooms'] = async () => ({ ok: true, rooms: [] }),
+  over: Partial<BindingActionProps> = {},
 ): BindingActionProps {
-  return { sessionId: SESSION, list, rooms, bind, unbind, t } as BindingActionProps
+  return {
+    sessionId: SESSION,
+    list, rooms, bind, unbind, t,
+    resolve: async () => ({ ok: false, code: 'room-unknown' }),
+    leave: async () => ({ ok: true }),
+    rejoin: async () => ({ ok: false, code: 'not-bound' }),
+    ...over,
+  } as BindingActionProps
 }
 
 const trigger = (): HTMLElement => screen.getByRole('button', { name: zh['trigger'] })
@@ -106,6 +114,58 @@ describe('BindingAction room list', () => {
     expect(screen.getByText(zh['rooms.empty'])).toBeDefined()
   })
 
+  it('enters a listed room directly through the resolver', async () => {
+    const resolve = vi.fn<BindingActionProps['resolve']>(async () => ({
+      ok: true,
+      room: { roomId: 'faddba2498de6001', name: '打龙战斗协作', roomType: 'public', cookie: 'resolved-cookie' },
+    }))
+    const bind = vi.fn<BindingActionProps['bind']>(async () => ({ ok: true, binding: binding() }))
+    render(<BindingAction {...props(
+      async () => [], bind, undefined, async () => ({ ok: true, rooms }), { resolve },
+    )} />)
+    await settle()
+    await act(async () => { fireEvent.click(trigger()) })
+    await settle()
+    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: zh['rooms.enter'] })[0]!) })
+    expect(resolve).toHaveBeenCalledWith({ value: 'faddba2498de6001' })
+    expect(bind).toHaveBeenCalledWith({ sessionId: SESSION, cookie: 'resolved-cookie', wake: 'idle-only' })
+    expect(screen.getByText(zh['boundAs'].replace('{name}', 'AI-Worker-01'))).toBeDefined()
+  })
+
+  it('reports a room the resolver cannot find', async () => {
+    const resolve = vi.fn<BindingActionProps['resolve']>(async () => ({ ok: false, code: 'room-unknown' }))
+    const bind = vi.fn<BindingActionProps['bind']>(async () => ({ ok: true, binding: binding() }))
+    render(<BindingAction {...props(async () => [], bind, undefined, undefined, { resolve })} />)
+    await settle()
+    await act(async () => { fireEvent.click(trigger()) })
+    fireEvent.change(screen.getByPlaceholderText(zh['invitePlaceholder']), { target: { value: 'nowhere' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['bind'] })) })
+    expect(resolve).toHaveBeenCalledWith({ value: 'nowhere' })
+    expect(bind).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert').textContent).toBe(zh['error.room-unknown'])
+  })
+
+  it('binds with the access key an invite link carries', async () => {
+    const resolve = vi.fn<BindingActionProps['resolve']>(async () => ({
+      ok: true,
+      room: {
+        roomId: 'deadbeefdeadbeef', name: 'private room', roomType: 'private',
+        cookie: 'private-cookie', accessKey: 'vk-url',
+      },
+    }))
+    const bind = vi.fn<BindingActionProps['bind']>(async () => ({ ok: true, binding: binding() }))
+    render(<BindingAction {...props(async () => [], bind, undefined, undefined, { resolve })} />)
+    await settle()
+    await act(async () => { fireEvent.click(trigger()) })
+    const invite = 'https://chat.example.com/room/deadbeefdeadbeef?cookie=private-cookie&key=vk-url'
+    fireEvent.change(screen.getByPlaceholderText(zh['invitePlaceholder']), { target: { value: invite } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['bind'] })) })
+    expect(resolve).toHaveBeenCalledWith({ value: invite })
+    expect(bind).toHaveBeenCalledWith({
+      sessionId: SESSION, cookie: 'private-cookie', accessKey: 'vk-url', wake: 'idle-only',
+    })
+  })
+
   it('recovers the room list from a failed read', async () => {
     const load = vi.fn()
       .mockRejectedValueOnce(new Error('gateway down'))
@@ -138,6 +198,36 @@ describe('BindingAction bound state', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['unbind'] })) })
     expect(unbind).toHaveBeenCalledWith(SESSION)
     expect(screen.getByRole('button', { name: zh['bind'] })).toBeDefined()
+  })
+
+  it('leaves the room and offers to rejoin while keeping the binding', async () => {
+    const leave = vi.fn<BindingActionProps['leave']>(async () => ({ ok: true }))
+    const list = vi.fn()
+      .mockResolvedValueOnce([binding()])
+      .mockResolvedValueOnce([binding()])
+      .mockResolvedValue([binding({ status: 'left' })])
+    render(<BindingAction {...props(list, undefined, undefined, undefined, { leave })} />)
+    await settle()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['trigger.bound'].replace('{name}', 'AI-Worker-01') })) })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['leave'] })) })
+    expect(leave).toHaveBeenCalledWith({ sessionId: SESSION })
+    expect(screen.getByText(zh['status.left'])).toBeDefined()
+    expect(screen.getByRole('button', { name: zh['rejoin'] })).toBeDefined()
+    expect(screen.queryByRole('button', { name: zh['leave'] })).toBeNull()
+  })
+
+  it('rejoins a left binding with a fresh access key', async () => {
+    const rejoin = vi.fn<BindingActionProps['rejoin']>(async () => ({ ok: true, binding: binding() }))
+    render(<BindingAction {...props(
+      async () => [binding({ status: 'left' })], undefined, undefined, undefined, { rejoin },
+    )} />)
+    await settle()
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['trigger.bound'].replace('{name}', 'AI-Worker-01') })) })
+    expect(screen.getByText(zh['status.left'])).toBeDefined()
+    fireEvent.change(screen.getByPlaceholderText(zh['accessKeyPlaceholder']), { target: { value: ' vk-new ' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['rejoin'] })) })
+    expect(rejoin).toHaveBeenCalledWith({ sessionId: SESSION, accessKey: 'vk-new' })
+    expect(screen.getByText(zh['status.active'])).toBeDefined()
   })
 
   it('surfaces a rejected unbind instead of clearing the binding', async () => {
@@ -244,8 +334,9 @@ describe('BindingAction interaction', () => {
     await settle()
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['trigger.bound'].replace('{name}', 'AI-Worker-01') })) })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: zh['unbind'] })) })
-    const working = screen.getByRole('button', { name: zh['working'] })
-    expect((working as HTMLButtonElement).disabled).toBe(true)
+    // Both the leave and unbind actions show the pending label while the unbind is in flight.
+    const working = screen.getAllByRole('button', { name: zh['working'] })
+    expect(working.every(button => (button as HTMLButtonElement).disabled)).toBe(true)
     expect(unbind).toHaveBeenCalledTimes(1)
     await act(async () => { pending.reject(new Error('offline')) })
     expect(screen.getByRole('alert').textContent).toBe(zh['error.generic'])

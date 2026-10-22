@@ -32,8 +32,23 @@ export async function mountBinding(ctx: Context, contribution: TypertRemoteContr
         if (!result.ok) throw result.error
         return result.value
       },
+      resolve: async (request) => {
+        const result = await child.remote.chatBridgeBinder.resolve(request)
+        if (!result.ok) throw result.error
+        return result.value
+      },
       bind: async (request) => {
         const result = await child.remote.chatBridgeBinder.bind(request)
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      leave: async (request) => {
+        const result = await child.remote.chatBridgeBinder.leave(request)
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      rejoin: async (request) => {
+        const result = await child.remote.chatBridgeBinder.rejoin(request)
         if (!result.ok) throw result.error
         return result.value
       },

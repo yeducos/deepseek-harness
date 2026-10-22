@@ -811,6 +811,105 @@ it('treats empty identities as no-ops', async () => {
   expect(await test.service.unbind({ sessionId: 'unbound' })).toEqual({ ok: true, removed: false })
 })
 
+it('resolves a room id and an invite link without landing a binding', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  expect(await test.service.resolve({ value: 'faddba2498de6001' })).toEqual({
+    ok: true,
+    room: {
+      roomId: 'faddba2498de6001', name: 'binder-fixture', roomType: 'public', cookie: 'fixture-cookie',
+    },
+  })
+  expect(await test.service.resolve({
+    value: 'https://chat.example.com/room/faddba2498de6001?cookie=fixture-cookie',
+  })).toEqual({
+    ok: true,
+    room: {
+      roomId: 'faddba2498de6001', name: 'binder-fixture', roomType: 'public', cookie: 'fixture-cookie',
+    },
+  })
+  expect(await test.service.resolve({ value: ' ' })).toEqual({ ok: false, code: 'invalid-value' })
+  expect(await test.service.resolve({ value: 'nowhere' })).toEqual({ ok: false, code: 'room-unknown' })
+  expect(table(test).get(BindingId('original'))).toBeUndefined()
+  expect(fake.state.joined.size).toBe(0)
+})
+
+it('requires an access key for a private room and returns the key an invite link carries', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  expect(await test.service.resolve({ value: 'deadbeefdeadbeef' })).toEqual({ ok: false, code: 'room-private' })
+  expect(await test.service.resolve({ value: 'deadbeefdeadbeef', accessKey: 'wrong' }))
+    .toEqual({ ok: false, code: 'room-private' })
+  expect(await test.service.resolve({ value: 'deadbeefdeadbeef', accessKey: 'vk-test' })).toMatchObject({
+    ok: true, room: { cookie: 'fixture-private', roomType: 'private' },
+  })
+  expect(await test.service.resolve({
+    value: 'https://chat.example.com/room/deadbeefdeadbeef?cookie=fixture-private&key=vk-test',
+  })).toMatchObject({ ok: true, room: { cookie: 'fixture-private', accessKey: 'vk-test' } })
+  expect(await test.service.bind({
+    sessionId: 'original', cookie: 'fixture-private', accessKey: 'vk-test',
+  })).toMatchObject({ ok: true, binding: { source: 'runtime' } })
+})
+
+it('leaves the room, keeps the binding, and stops waking the Session', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  fake.push('AI-Server-01', 'first')
+  await vi.waitFor(() => { expect(test.agent?.followup).toHaveBeenCalledTimes(1) })
+  expect(await test.service.leave({ sessionId: 'original' })).toEqual({ ok: true })
+  expect(fake.state.leftNames).toEqual(['AI-Worker-01'])
+  expect(table(test).get(BindingId('original'))).toMatchObject({ status: 'left', cookie: 'runtime-cookie' })
+  fake.push('AI-Server-01', 'second')
+  await tick(1200)
+  expect(test.agent?.followup).toHaveBeenCalledTimes(1)
+  expect(await test.service.leave({ sessionId: 'original' })).toEqual({ ok: true })
+  expect(await test.service.leave({ sessionId: 'unbound' })).toEqual({ ok: false, code: 'not-bound' })
+  expect(await test.service.leave({ sessionId: ' ' })).toEqual({ ok: false, code: 'session-unknown' })
+})
+
+it('rejoins a left binding from the current backlog without replaying the gap', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  fake.push('AI-Server-01', 'before leave')
+  await vi.waitFor(() => { expect(test.agent?.followup).toHaveBeenCalledTimes(1) })
+  await test.service.leave({ sessionId: 'original' })
+  fake.push('AI-Server-01', 'while away')
+  expect(await test.service.rejoin({ sessionId: 'original' })).toMatchObject({
+    ok: true, binding: { status: 'active', since: 2 },
+  })
+  await tick(1200)
+  expect(test.agent?.followup).toHaveBeenCalledTimes(1)
+  fake.push('AI-Server-01', 'after rejoin')
+  await vi.waitFor(() => { expect(test.agent?.followup).toHaveBeenCalledTimes(2) })
+  const message = test.agent!.followup.mock.calls[1]![0]
+  expect((message.content[0] as { text: string }).text).toContain('after rejoin')
+})
+
+it('refuses to rejoin a binding that did not leave', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  expect(await test.service.rejoin({ sessionId: 'original' })).toEqual({ ok: false, code: 'not-left' })
+  expect(await test.service.rejoin({ sessionId: 'unbound' })).toEqual({ ok: false, code: 'not-bound' })
+  expect(await test.service.rejoin({ sessionId: ' ' })).toEqual({ ok: false, code: 'session-unknown' })
+})
+
+it('does not restart a left runtime binding after a reload', async () => {
+  const fake = await fakeRoom()
+  const config = binderConfig(fake.url, { bindings: [] })
+  const test = await harness({ agent: 'original', config })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  await test.service.leave({ sessionId: 'original' })
+  await test.fiber.dispose()
+  await test.ctx.plugin(ChatBridgeBinderService, config)
+  await vi.waitFor(() => { expect(table(test).get(BindingId('original'))?.status).toBe('left') })
+  fake.push('AI-Server-01', 'after reload')
+  await tick(1500)
+  expect(test.agent?.followup).not.toHaveBeenCalled()
+})
+
 it('orders listed bindings by Session without reading room cookies', async () => {
   const fake = await fakeRoom()
   const test = await harness({

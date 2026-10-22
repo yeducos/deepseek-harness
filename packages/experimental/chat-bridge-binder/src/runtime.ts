@@ -265,6 +265,7 @@ export type RoomCheck =
  * @param cookie - room credential for the connection headers.
  * @param name - existing room name to try first; omission applies for one.
  * @param timeoutMs - bound on each handshake tool call.
+ * @param accessKey - access key a private room requires for the first join.
  * @returns the joined name and baseline cursor, or the category of refusal without credential material.
  */
 export async function checkRoom(
@@ -272,15 +273,24 @@ export async function checkRoom(
   cookie: string,
   name: string | undefined,
   timeoutMs: number,
+  accessKey?: string,
 ): Promise<RoomCheck> {
   const connection = new BridgeConnection(url, cookie)
   const signal = new AbortController().signal
+  const join = async (member: string): Promise<void> => {
+    await connection.call(
+      'join_room',
+      accessKey === undefined ? { name: member } : { name: member, access_key: accessKey },
+      timeoutMs,
+      signal,
+    )
+  }
   try {
     await connection.connect()
     let joined = name
     if (joined !== undefined) {
       try {
-        await connection.call('join_room', { name: joined }, timeoutMs, signal)
+        await join(joined)
       } catch {
         // A name the room never applied, or a refused join, falls back to applying a fresh one.
         joined = undefined
@@ -289,7 +299,7 @@ export async function checkRoom(
     if (joined === undefined) {
       const applied = await connection.call('apply_agent_name', { role: 'Server' }, timeoutMs, signal)
       joined = parseAppliedName(applied)
-      await connection.call('join_room', { name: joined }, timeoutMs, signal)
+      await join(joined)
     }
     const window = await connection.call(
       'get_messages', { since: 0, wait_seconds: 0, for_member: joined, reader: joined }, timeoutMs, signal,

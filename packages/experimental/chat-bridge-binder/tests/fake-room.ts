@@ -22,6 +22,8 @@ export interface FakeRoomState {
   readonly names: Set<string>
   /** Name joined per room cookie, for assertions. */
   readonly joined: Map<string, string>
+  /** Names whose leave_room call reached the fake, in order. */
+  readonly leftNames: string[]
   /** Number of apply_agent_name calls so far. */
   applies: number
   /** Counter feeding the next applied name. */
@@ -59,6 +61,10 @@ export interface FakeChatBridge {
   push(sender: string, body: string, target?: string): number
   close(): Promise<void>
 }
+
+/** Rooms the fake resolver answers for; the private one requires an access key. */
+const PUBLIC_ROOM = { roomId: 'faddba2498de6001', cookie: 'fixture-cookie' } as const
+const PRIVATE_ROOM = { roomId: 'deadbeefdeadbeef', cookie: 'fixture-private', accessKey: 'vk-test' } as const
 
 /** Deterministic timestamp for pushed messages, keyed by id. */
 function sentAtFor(id: number): string {
@@ -110,7 +116,8 @@ function parseCookie(header: string | undefined): string | undefined {
  */
 export async function startFakeChatBridge(options: { preApplied?: readonly string[] } = {}): Promise<FakeChatBridge> {
   const state: FakeRoomState = {
-    messages: [], names: new Set(options.preApplied ?? []), joined: new Map(), applies: 0, nextName: 1,
+    messages: [], names: new Set(options.preApplied ?? []), joined: new Map(), leftNames: [],
+    applies: 0, nextName: 1,
   }
   const faults: FakeFaults = {
     rejectRequests: 0, terminateSessions: 0, failJoins: 0, textlessJoins: 0,
@@ -142,7 +149,7 @@ export async function startFakeChatBridge(options: { preApplied?: readonly strin
     })
     mcp.registerTool('join_room', {
       description: 'Joins the room under a name.',
-      inputSchema: z.object({ name: z.string() }),
+      inputSchema: z.object({ name: z.string(), access_key: z.string().optional() }),
     }, async ({ name }): Promise<CallToolResult> => {
       if (faults.textlessJoins > 0) {
         faults.textlessJoins -= 1
@@ -155,6 +162,38 @@ export async function startFakeChatBridge(options: { preApplied?: readonly strin
       if (!state.names.has(name)) return toolError(`名字 ${name} 未申请`)
       if (currentCookie !== undefined) state.joined.set(currentCookie, name)
       return text('已加入房间，当前发言权: free')
+    })
+    mcp.registerTool('leave_room', {
+      description: 'Leaves the room under a name.',
+      inputSchema: z.object({ name: z.string().optional() }),
+    }, async ({ name }): Promise<CallToolResult> => {
+      if (name === undefined) return toolError('leave_room requires a name')
+      state.leftNames.push(name)
+      return text(`成员 ${name} 已离开房间`)
+    })
+    mcp.registerTool('resolve_room', {
+      description: 'Resolves an invite link, room id, or cookie into a room cookie.',
+      inputSchema: z.object({ value: z.string(), access_key: z.string().optional() }),
+    }, async ({ value, access_key: providedKey }): Promise<CallToolResult> => {
+      const trimmed = value.trim()
+      const urlKey = /[?&](?:key|access_key)=([^&]+)/.exec(trimmed)?.[1]
+      const urlCookie = /[?&]cookie=([^&]+)/.exec(trimmed)?.[1]
+      const isPublic = trimmed === PUBLIC_ROOM.cookie || trimmed === PUBLIC_ROOM.roomId
+        || PUBLIC_ROOM.roomId.startsWith(trimmed) || urlCookie === PUBLIC_ROOM.cookie
+      const isPrivate = trimmed === PRIVATE_ROOM.roomId || urlCookie === PRIVATE_ROOM.cookie
+      if (!isPublic && !isPrivate) return text('[错误] room-missing: 房间不存在')
+      if (isPrivate) {
+        const key = providedKey ?? urlKey
+        if (key === undefined) return text('[错误] room-private: 私密房间需要访问密钥')
+        if (key !== PRIVATE_ROOM.accessKey) return text('[错误] access-key-invalid: 无效的访问密钥')
+        return text(JSON.stringify({
+          room_id: PRIVATE_ROOM.roomId, room_name: 'binder-private', room_type: 'private',
+          cookie: PRIVATE_ROOM.cookie, ...(urlKey === undefined ? {} : { access_key: urlKey }),
+        }))
+      }
+      return text(JSON.stringify({
+        room_id: PUBLIC_ROOM.roomId, room_name: 'binder-fixture', room_type: 'public', cookie: PUBLIC_ROOM.cookie,
+      }))
     })
     mcp.registerTool('list_rooms', {
       description: 'Lists the public rooms.',

@@ -16,7 +16,7 @@ export const bindingRowSchema = z.object({
   agentName: z.string().min(1),
   cookie: z.string().min(1),
   since: z.number().int().min(0),
-  status: z.enum(['active', 'stopped']).default('active'),
+  status: z.enum(['active', 'stopped', 'left']).default('active'),
   source: z.enum(['declared', 'runtime']).default('declared'),
   wake: z.enum(['idle-only', 'always']).default('idle-only'),
 }).strict()
@@ -26,6 +26,7 @@ export type BindingRow = z.infer<typeof bindingRowSchema>
 
 /** Authoritative binder storage; malformed rows reject opening the domain. */
 export const chatBridgeBinderDomain = defineDomain({
-  name: 'chat_bridge_binder', version: 1,
+  // Version 2 adds the `left` status; version-1 rows still read under this schema.
+  name: 'chat_bridge_binder', version: 2, compatibleVersions: [1],
   tables: { bindings: domainTable<BindingId, BindingRow>(bindingRowSchema) },
 })

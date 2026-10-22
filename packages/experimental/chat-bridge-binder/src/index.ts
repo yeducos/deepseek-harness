@@ -28,15 +28,18 @@ import type { ResolvedReconnectPolicy } from './reconnect.ts'
 import { chatBridgeBinderDomain } from './storage.ts'
 import type { BindingRow } from './storage.ts'
 import { BindingLoop, checkRoom } from './runtime.ts'
-import { listRooms } from './rooms.ts'
+import { leaveRoom, listRooms, resolveRoom } from './rooms.ts'
 import type {
-  BindRequest, BindResult, BindingSource, BindingView, Config, ReconnectConfig,
-  RoomListResult, UnbindRequest, UnbindResult, WakeMode,
+  BindRequest, BindResult, BindingSource, BindingStatus, BindingView, Config, LeaveRequest, LeaveResult,
+  ReconnectConfig, RejoinRequest, RejoinResult, ResolveRequest, ResolveResult, RoomListResult,
+  UnbindRequest, UnbindResult, WakeMode,
 } from './types.ts'
 
 export type {
-  BindFailureCode, BindRequest, BindResult, BindingConfig, BindingSource, BindingView,
-  Config, ReconnectConfig, RoomListResult, RoomSummary, UnbindRequest, UnbindResult, WakeMode,
+  BindFailureCode, BindRequest, BindResult, BindingConfig, BindingSource, BindingStatus, BindingView,
+  Config, LeaveRequest, LeaveResult, ReconnectConfig, RejoinFailureCode, RejoinRequest, RejoinResult,
+  ResolvedRoom, ResolveFailureCode, ResolveRequest, ResolveResult, RoomListResult, RoomSummary,
+  UnbindRequest, UnbindResult, WakeMode,
 } from './types.ts'
 export { BindingId }
 export { chatBridgeBinderDomain, bindingRowSchema } from './storage.ts'
@@ -47,7 +50,8 @@ export { parseWireText, truncateBody } from './wire.ts'
 export { renderChatBridgeFraming } from './framing.ts'
 export { parseAppliedName, BindingLoop, checkRoom } from './runtime.ts'
 export type { RoomCheck } from './runtime.ts'
-export { listRooms, parseRoomList } from './rooms.ts'
+export { leaveRoom, listRooms, parseRoomList, resolveRoom } from './rooms.ts'
+export type { LeaveRoomResult } from './rooms.ts'
 export { BridgeConnection, BridgeToolError } from './mcp.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -79,7 +83,7 @@ interface LoopSeed {
   readonly agentName: string | undefined
   readonly cookie: string
   readonly since: number
-  readonly status: 'active' | 'stopped'
+  readonly status: BindingStatus
   readonly source: BindingSource
   readonly wake: WakeMode
 }
@@ -219,6 +223,22 @@ export class ChatBridgeBinderService extends TypertRemoteService {
   }
 
   /**
+   * Turn an invite link, a room id, or a room cookie into the cookie a bind
+   * needs. Selecting a listed room and pasting an invite link both take this
+   * path; a private room answers only under a valid access key.
+   * @param request - The room reference as entered, plus an optional access key.
+   * @returns the resolved room with its cookie, or the refusal category.
+   */
+  @Remote
+  async resolve(request: ResolveRequest): Promise<ResolveResult> {
+    const value = request.value.trim()
+    if (value.length === 0 || /[\r\n]/.test(value)) return { ok: false, code: 'invalid-value' }
+    const accessKey = request.accessKey?.trim()
+    if (accessKey !== undefined && /[\r\n]/.test(accessKey)) return { ok: false, code: 'invalid-value' }
+    return await resolveRoom(this.url, value, accessKey === '' ? undefined : accessKey, this.bindTimeoutMs)
+  }
+
+  /**
    * Bind one live Session to a room and start watching it. The room handshake
    * runs before anything durable changes, so a wrong credential leaves the
    * existing binding untouched.
@@ -239,11 +259,17 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     const stored = bindings.get(key)
     if (this.declaredSessions().has(bound) || stored?.source === 'declared') return { ok: false, code: 'declared-binding' }
     const wake = request.wake ?? 'idle-only'
-    const checked = await checkRoom(this.url, request.cookie, name, this.bindTimeoutMs)
+    const accessKey = request.accessKey?.trim()
+    if (accessKey !== undefined && /[\r\n]/.test(accessKey)) return { ok: false, code: 'invalid-cookie' }
+    const checked = await checkRoom(
+      this.url, request.cookie, name, this.bindTimeoutMs, accessKey === '' ? undefined : accessKey,
+    )
     if (!checked.ok) return { ok: false, code: checked.reason === 'rejected' ? 'room-rejected' : 'room-unreachable' }
+    // A member that left the room starts from the current backlog instead of replaying missed messages.
+    const since = stored?.status === 'left' ? checked.since : stored?.since ?? checked.since
     const row: BindingRow = {
       sessionId: bound, agentName: checked.name, cookie: request.cookie,
-      since: stored?.since ?? checked.since, status: 'active', source: 'runtime', wake,
+      since, status: 'active', source: 'runtime', wake,
     }
     await this.stopLoop(key)
     await bindings.put(key, row)
@@ -271,6 +297,62 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     return { ok: true, removed: true }
   }
 
+  /**
+   * Remove the bound member from its room and keep the binding. The Session
+   * stops receiving room messages until it rejoins; polling stops first so the
+   * loop cannot race the leave with a fresh apply for a name.
+   * @param request - Session whose bound member leaves its room.
+   * @returns whether the member left, was already gone, or the room was unreachable.
+   */
+  @Remote
+  async leave(request: LeaveRequest): Promise<LeaveResult> {
+    const sessionId = request.sessionId.trim()
+    if (sessionId.length === 0) return { ok: false, code: 'session-unknown' }
+    const key = BindingId(SessionId(sessionId))
+    const bindings = (await this.ready).table('bindings')
+    const row = bindings.get(key)
+    if (row === undefined) return { ok: false, code: 'not-bound' }
+    if (row.status === 'left') return { ok: true }
+    await this.stopLoop(key)
+    const result = await leaveRoom(this.url, row.cookie, row.agentName, this.bindTimeoutMs)
+    if (!result.ok) {
+      // The member almost certainly still sits in the room; keep watching it so view and room agree.
+      this.startLoop(row)
+      return { ok: false, code: 'room-unreachable' }
+    }
+    await bindings.put(key, { ...row, status: 'left' })
+    return { ok: true }
+  }
+
+  /**
+   * Re-enter the room of a binding whose member left. The join handshake runs
+   * first, then the cursor resets to the room's current backlog so re-entering
+   * does not replay messages missed while away.
+   * @param request - Session whose binding re-enters, plus a fresh private-room key.
+   * @returns the active binding, or the refusal category.
+   */
+  @Remote
+  async rejoin(request: RejoinRequest): Promise<RejoinResult> {
+    const sessionId = request.sessionId.trim()
+    if (sessionId.length === 0) return { ok: false, code: 'session-unknown' }
+    const bound = SessionId(sessionId)
+    const key = BindingId(bound)
+    const bindings = (await this.ready).table('bindings')
+    const row = bindings.get(key)
+    if (row === undefined) return { ok: false, code: 'not-bound' }
+    if (row.status !== 'left') return { ok: false, code: 'not-left' }
+    const accessKey = request.accessKey?.trim()
+    const checked = await checkRoom(
+      this.url, row.cookie, row.agentName, this.bindTimeoutMs, accessKey === '' ? undefined : accessKey,
+    )
+    if (!checked.ok) return { ok: false, code: checked.reason === 'rejected' ? 'room-rejected' : 'room-unreachable' }
+    const next: BindingRow = { ...row, agentName: checked.name, since: checked.since, status: 'active' }
+    await this.stopLoop(key)
+    await bindings.put(key, next)
+    this.startLoop(next)
+    return { ok: true, binding: viewOf(next) }
+  }
+
   /** Upsert one row per declared binding and drop declared rows whose declaration was removed. */
   private async applyDeclarations(domain: Domain<typeof chatBridgeBinderDomain>): Promise<void> {
     const bindings = domain.table('bindings')
@@ -281,9 +363,11 @@ export class ChatBridgeBinderService extends TypertRemoteService {
       const stored = bindings.get(key)
       const agentName = plan.agentName ?? stored?.agentName
       if (agentName === undefined) continue
+      // An explicit leave survives a reload; declarations do not drag the member back in.
       await bindings.put(key, {
         sessionId: plan.sessionId, agentName, cookie: plan.cookie,
-        since: stored?.since ?? plan.since ?? 0, status: 'active', source: 'declared', wake: plan.wake,
+        since: stored?.since ?? plan.since ?? 0,
+        status: stored?.status === 'left' ? 'left' : 'active', source: 'declared', wake: plan.wake,
       })
     }
     for (const [key, row] of bindings.entries()) {
@@ -298,6 +382,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     for (const plan of this.plans) {
       const key = BindingId(plan.sessionId)
       const stored = bindings.get(key)
+      if (stored?.status === 'left') continue
       this.startLoop({
         sessionId: plan.sessionId, agentName: plan.agentName ?? stored?.agentName, cookie: plan.cookie,
         since: stored?.since ?? plan.since ?? 0, status: 'active', source: 'declared', wake: plan.wake,
@@ -308,7 +393,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
   /** Restart loops for runtime bindings that survived a reload. */
   private startRestoredLoops(domain: Domain<typeof chatBridgeBinderDomain>): void {
     for (const [, row] of domain.table('bindings').entries()) {
-      if (row.source !== 'runtime') continue
+      if (row.source !== 'runtime' || row.status === 'left') continue
       this.startLoop(row)
     }
   }
