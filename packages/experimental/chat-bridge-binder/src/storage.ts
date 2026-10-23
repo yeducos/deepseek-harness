@@ -26,7 +26,8 @@ export type BindingRow = z.infer<typeof bindingRowSchema>
 
 /** Authoritative binder storage; malformed rows reject opening the domain. */
 export const chatBridgeBinderDomain = defineDomain({
-  // Version 2 adds the `left` status; version-1 rows still read under this schema.
-  name: 'chat_bridge_binder', version: 2, compatibleVersions: [1],
+  // The `left` status widens an enum inside unchanged JSON, so the medium format
+  // keeps its version: the single layout rejects any stored version it did not write.
+  name: 'chat_bridge_binder', version: 1,
   tables: { bindings: domainTable<BindingId, BindingRow>(bindingRowSchema) },
 })
