@@ -882,6 +882,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Provider adapters dispatch authenticated deliveries; trusted plugins register independent process-local rules, and the runtime turns non-null results into ordinary Workspace-backed Sessions without delivery or completion state.',
   },
   {
+    key: 'chatBridgeBinder',
+    pkg: 'experimental-chat-bridge-binder',
+    title: 'Chat-bridge room binder',
+    mode: 'core',
+    note: 'Holds durable Session-to-room bindings and one long-poll loop per active binding; a room message addressed to the bound agent wakes the idle Session through the schedule delivery path, and the daemon never writes to the room.',
+  },
+  {
     key: 'lsp',
     pkg: 'lsp',
     title: 'Language-server navigation seam',

@@ -42,6 +42,7 @@ kind: "package-group"
 | [`terminal-bundle`](terminal-bundle/README.zh.md) | 可选全局持久终端工具 | — |
 | [`badge-skill-bundle`](badge-skill-bundle/README.zh.md) | 可选 powered-by-dsh 徽章技能 | — |
 | [`session-titles-bundle`](session-titles-bundle/README.zh.md) | 随对话中人类提示更新的可选标题 | — |
+| [`chat-bridge-binder`](chat-bridge-binder/README.zh.md) | 持久的 chat-bridge 房间绑定，唤醒绑定的空闲 Session | `ctx.chatBridgeBinder` |
 | [`hook-protocol`](hook-protocol/README.zh.md) | 钩子桥接的通信类型与持久事件 | — |
 | [`hooks-claude-code`](hooks-claude-code/README.zh.md) | Claude Code 钩子桥接 | — |
 | [`hooks-codex`](hooks-codex/README.zh.md) | Codex 钩子桥接 | — |

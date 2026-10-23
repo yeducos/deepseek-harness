@@ -437,6 +437,10 @@ Plugin-sourced `followup()` synchronously appends the message to the Session inb
 
 A failure to resolve the Session, enqueue the message, or confirm persistence leaves the task stored and reports a Host warning. A later management change or Host restart retries it. Session persistence and the task put are not atomic across stores. A crash after inbox persistence but before the task put can repeat delivery; the receipt does not close this gap. Schedule provides no model-result acknowledgement, execution cancellation, or external notification channel.
 
+## Chat-bridge room bindings
+
+`ctx.chatBridgeBinder` applies the same idle-Session delivery to an external chat-bridge room. A binding row in the `chat_bridge_binder` storage domain holds the bound Session, the room cookie, the joined agent name, and the last processed message id; each active binding keeps one MCP long-poll request open. The default `wake: idle-only` delivers every message the room makes visible to the member and ends the binding when the Session stops, while `wake: always` delivers only messages addressed to the joined member and keeps polling across a local stop. Delivery resumes the Session through the Session controller and enters the inbox as one user-role message whose source kind is `chat-bridge`, and the stored cursor advances only after `flush` acknowledges persistence, so a crash repeats the batch rather than losing it. The binder only reads the room: replies travel through the agent's own chat-bridge tools. The [package README](../../packages/experimental/chat-bridge-binder/README.md) owns composition, configuration, and the delivered framing.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -444,6 +448,47 @@ A failure to resolve the Session, enqueue the message, or confirm persistence le
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxchatbridgebinder--chatbridgebinderservice"></a>
+
+### `ctx.chatBridgeBinder` — `ChatBridgeBinderService`
+
+Durable chat-bridge room bindings that wake bound Sessions.
+
+`sessionPersistence` is a load-order requirement rather than a directly called service: a wake commits only when `ctx.sessions.flush()` reports that a `session/flush` listener participated, and the persistence backend providing this service is the plugin that registers that listener.
+
+```ts cordis-catalog
+/**
+ * List every binding this Host holds, declared or runtime.
+ * @returns bindings without room credentials, ordered by Session id.
+ */
+@Remote async list(): Promise<readonly BindingView[]>
+
+/**
+ * Read the public room list for the binding form. The listing carries no
+ * credential, so it locates rooms without joining any of them.
+ * @returns the public rooms, or that the room service was unreachable.
+ */
+@Remote async rooms(): Promise<RoomListResult>
+
+/**
+ * Bind one live Session to a room and start watching it. The room handshake
+ * runs before anything durable changes, so a wrong credential leaves the
+ * existing binding untouched.
+ * @param request - Session, room credential, optional name and wake scope.
+ * @returns the new binding, or the refusal category.
+ */
+@Remote async bind(request: BindRequest): Promise<BindResult>
+
+/**
+ * Remove one runtime binding and stop watching its room.
+ * @param request - Session whose runtime binding is removed.
+ * @returns whether a row was removed, or that declarations own the binding.
+ */
+@Remote async unbind(request: UnbindRequest): Promise<UnbindResult>
+```
+
+Source: [`packages/experimental/chat-bridge-binder/src/index.ts`](../../packages/experimental/chat-bridge-binder/src/index.ts)
 
 <a id="ctxschedule--scheduleservice"></a>
 

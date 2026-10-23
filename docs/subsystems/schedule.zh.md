@@ -437,6 +437,10 @@ type ScheduleDeliveryHistoryResult =
 
 Session 获取、消息入队或持久化确认失败时，任务继续保存在存储中，并报告宿主警告。后续管理变更或宿主重启会重试。Session 持久化与任务 put 不具有跨存储原子性。收件箱已持久化、任务尚未 put 时发生崩溃，可能重复投递；回执并未消除这一间隔。Schedule 不提供模型结果回执、执行取消或外部通知渠道。
 
+## chat-bridge 房间绑定
+
+`ctx.chatBridgeBinder` 把同一套空闲 Session 投递用于外部 chat-bridge 房间。`chat_bridge_binder` 存储域中的绑定行保存被绑定的 Session、房间 cookie、已加入的 agent 名称与最近处理的消息 id；每条活动绑定保持一个打开的 MCP 长轮询请求。默认的 `wake: idle-only` 投递房间对该成员可见的每一条消息，并在 Session 停止时结束绑定；`wake: always` 只投递点名已加入成员的消息，并在本地停止后继续轮询。投递经 Session 控制器恢复该 Session，并以来源种类为 `chat-bridge` 的一条 user-role 消息进入收件箱；只有在 `flush` 确认持久化后存储游标才前进，因此崩溃会重复该批次而不是丢失它。binder 只读房间：回复经 agent 自己的 chat-bridge 工具发出。组合、配置与投递框架由[包 README](../../packages/experimental/chat-bridge-binder/README.zh.md) 拥有。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -444,6 +448,47 @@ Session 获取、消息入队或持久化确认失败时，任务继续保存在
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxchatbridgebinder--chatbridgebinderservice"></a>
+
+### `ctx.chatBridgeBinder` — `ChatBridgeBinderService`
+
+Durable chat-bridge room bindings that wake bound Sessions.
+
+`sessionPersistence` is a load-order requirement rather than a directly called service: a wake commits only when `ctx.sessions.flush()` reports that a `session/flush` listener participated, and the persistence backend providing this service is the plugin that registers that listener.
+
+```ts cordis-catalog
+/**
+ * List every binding this Host holds, declared or runtime.
+ * @returns bindings without room credentials, ordered by Session id.
+ */
+@Remote async list(): Promise<readonly BindingView[]>
+
+/**
+ * Read the public room list for the binding form. The listing carries no
+ * credential, so it locates rooms without joining any of them.
+ * @returns the public rooms, or that the room service was unreachable.
+ */
+@Remote async rooms(): Promise<RoomListResult>
+
+/**
+ * Bind one live Session to a room and start watching it. The room handshake
+ * runs before anything durable changes, so a wrong credential leaves the
+ * existing binding untouched.
+ * @param request - Session, room credential, optional name and wake scope.
+ * @returns the new binding, or the refusal category.
+ */
+@Remote async bind(request: BindRequest): Promise<BindResult>
+
+/**
+ * Remove one runtime binding and stop watching its room.
+ * @param request - Session whose runtime binding is removed.
+ * @returns whether a row was removed, or that declarations own the binding.
+ */
+@Remote async unbind(request: UnbindRequest): Promise<UnbindResult>
+```
+
+Source: [`packages/experimental/chat-bridge-binder/src/index.ts`](../../packages/experimental/chat-bridge-binder/src/index.ts)
 
 <a id="ctxschedule--scheduleservice"></a>
 

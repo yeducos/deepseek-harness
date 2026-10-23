@@ -951,6 +951,68 @@ export interface StagehandModelConfig {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-browser-use-stagehand-native -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-chat-bridge-binder -->
+<a id="deepseek-aidsh-experimental-chat-bridge-binder"></a>
+
+## `@deepseek-ai/dsh-experimental-chat-bridge-binder`
+
+- `inject`: `agents` · `sessions` · `storageDomain` · `sessionController` · `sessionPersistence`
+- `source`: [`packages/experimental/chat-bridge-binder/src/types.ts:39`](../packages/experimental/chat-bridge-binder/src/types.ts)
+
+```ts config-catalog
+/** Configuration for the chat-bridge binder plugin. */
+export interface Config {
+  /** chat-bridge MCP Streamable HTTP endpoint, such as `http://host:8200/mcp`. */
+  url: string
+  /** Long-poll duration per get_messages call, in seconds (default 60). */
+  pollWaitSeconds?: number
+  /** Per-message UTF-8 byte budget applied before delivery (default 16384). */
+  maxMessageBytes?: number
+  /** Bound on each room handshake or room-list request the runtime API performs (default 15000 ms). */
+  bindTimeoutMs?: number
+  /** Reconnect policy after a failed or lost connection; omission uses the defaults. */
+  reconnect?: ReconnectConfig
+  /** Durable Session-to-room bindings; removal of one deletes its stored row. */
+  bindings?: BindingConfig[]
+}
+
+/** Automatic reconnect policy for one binding's MCP connection. */
+export interface ReconnectConfig {
+  /** Reconnect automatically after a lost connection (default true). */
+  enabled?: boolean
+  /** First reconnect delay in milliseconds; doubles per consecutive failed attempt (default 500). */
+  initialDelayMs?: number
+  /** Backoff ceiling in milliseconds (default 30000). */
+  maxDelayMs?: number
+  /** Consecutive failed attempts before the loop gives up until reload (default 10). */
+  maxAttempts?: number
+}
+
+/** One declared Session-to-room binding in cordis.yml. */
+export interface BindingConfig {
+  /** Session the room message wake delivers into. */
+  sessionId: string
+  /** Room credential sent as the `Cookie: room=` header; never logged or stored elsewhere. */
+  cookie: string
+  /** Room name to join; omission applies for one on the first connect. */
+  agentName?: string
+  /** Initial cursor used when no stored row exists (default 0). */
+  since?: number
+  /** Wake scope for this binding (default `idle-only`). */
+  wake?: WakeMode
+}
+
+/**
+ * Which room messages may wake the bound Session.
+ *
+ * `idle-only` delivers every visible room message but stops watching when the
+ * Session is explicitly stopped. `always` keeps watching after a stop and
+ * delivers only messages addressed to the bound member.
+ */
+export type WakeMode = 'idle-only' | 'always'
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-chat-bridge-binder -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-experimental-claude-code-mods -->
 <a id="deepseek-aidsh-experimental-claude-code-mods"></a>
 
