@@ -27,9 +27,9 @@ kind: "package-reference"
 <a id="bindings"></a>
 ## 绑定
 
-一条绑定行在 `chat_bridge_binder` 存储域中保存绑定的 `sessionId`、房间 cookie、已加入的 agent 名称、最近处理的消息 id（`since`）、active/stopped 状态、来源 `source`（`declared` 或 `runtime`）与唤醒范围 `wake`。cordis.yml 通过插件配置中的 `bindings` 声明绑定；启动时服务为每条声明 upsert 一行 `declared` 绑定——声明的 cookie 和名称优先，存储的游标跨重启保留——并删除声明已被移除的 declared 行。结构性配置错误（URL 格式错误、缺失 cookie、cookie 含换行、同一 Session 被绑定多次）会在加载时使插件失败。
+一条绑定行在 `chat_bridge_binder` 存储域中保存绑定的 `sessionId`、房间 cookie、已加入的 agent 名称、最近处理的消息 id（`since`）、active/stopped 状态、来源 `source`（`declared` 或 `runtime`）与唤醒范围 `wake`。同一存储域还保存 `names` 表，以 Session 与房间 cookie 为键记录每个 Session 最近在该房间加入的成员名称；该记忆比绑定行存活更久。cordis.yml 通过插件配置中的 `bindings` 声明绑定；启动时服务为每条声明 upsert 一行 `declared` 绑定——声明的 cookie 和名称优先，存储的游标跨重启保留——并删除声明已被移除的 declared 行。结构性配置错误（URL 格式错误、缺失 cookie、cookie 含换行、同一 Session 被绑定多次）会在加载时使插件失败。
 
-Client 也可以从会话头部绑定当前 Session，无需修改配置或重载。头部入口挂载 Remote API——`list` 返回按 Session id 排序、不含凭据的视图，`bind` 创建 `runtime` 行，`unbind` 删除它——并展示绑定的房间、唤醒范围、来源与状态。列表中的房间、邀请链接与房间 cookie 走同一条进入路径：`resolve` 通过服务端的 `resolve_room` 工具把引用解析成房间 cookie（公共房间可按房间 ID 解析，邀请链接的 `?cookie=` 优先，私密房间需要访问密钥，链接的 `key` 参数可直接提供），随后 `bind` 执行与粘贴 cookie 相同的握手。选中列表房间即可直接进入；未提供 `resolve_room` 的服务会报告 `resolution-unsupported`，此时 cookie 输入框仍可用。`bind` 先校验请求，再在 `bindTimeoutMs`（默认 15 秒）限时内执行房间握手，因此错误的 cookie 或名称不会改动既有绑定；它拒绝不存在的 Session（`session-unknown`）、为空或含换行的 cookie（`invalid-cookie`）、显式空名称（`invalid-name`）、本次加载中由声明拥有的 Session（`declared-binding`），以及不可达或拒绝握手的房间（`room-unreachable`、`room-rejected`）。写入绑定行之前，`bind` 会读取房间当前消息窗口，并把 `since` 基线设为其中最大的消息 id，因此新建绑定只投递绑定之后到达的消息，而不是房间积压的历史；已存在的行保留其存储游标。`unbind` 停止循环、删除 runtime 行，并拒绝 declared 绑定。
+Client 也可以从会话头部绑定当前 Session，无需修改配置或重载。头部入口挂载 Remote API——`list` 返回按 Session id 排序、不含凭据的视图，`bind` 创建 `runtime` 行，`unbind` 删除它——并展示绑定的成员名称、唤醒范围、来源与状态。已绑定的 Session 还提供一个房间按钮，用于打开绑定房间的 WebUI 页面：其 `roomUrl` 由 MCP 端点 origin 与 cookie 的哈希得出，因此不含凭据；私密房间仍需在该页面提供访问密钥。面板主体是公共房间列表：点击某行即可进入该房间，行内只显示房间名与成员数，房间 ID 悬停可见；列表下方的一行次级入口展开后只有一个输入框，接受邀请链接、房间 ID 或 Cookie，仅当解析结果为私密房间时才出现访问密钥输入框；可选的房间名称与唤醒范围收在「高级设置」中。面板末尾默认收起的一段用于编辑 chat-bridge 服务地址：`endpoint` 读取 Host 当前加载的值，`setEndpoint` 同时改写 profile patch 文件中 `mcp-chat-bridge` MCP 客户端行与本插件 `chat-bridge-binder` 行的 `url`，保留注释、Cookie 及其余所有行。改动在重启 dsh 后生效，因此面板必须提示重启而不是热重载。列表中的房间、邀请链接与房间 cookie 走同一条进入路径：`resolve` 通过服务端的 `resolve_room` 工具把引用解析成房间 cookie（公共房间可按房间 ID 解析，邀请链接的 `?cookie=` 优先，私密房间需要访问密钥，链接的 `key` 参数可直接提供），随后 `bind` 执行与粘贴 cookie 相同的握手。选中列表房间即可直接进入；未提供 `resolve_room` 的服务会报告 `resolution-unsupported`，此时 cookie 输入框仍可用。`bind` 先校验请求，再在 `bindTimeoutMs`（默认 15 秒）限时内执行房间握手，因此错误的 cookie 或名称不会改动既有绑定；未显式指定名称时，它先复用本 Session 上次在该房间加入的名称，房间拒绝时才回退到申请新名称，并把最终加入的名称写入 `names` 表。`unbind` 保留该记忆，因此重新绑定仍以同一成员身份进房，不会重新申请 `AI-Server-NN`。`bind` 拒绝不存在的 Session（`session-unknown`）、为空或含换行的 cookie（`invalid-cookie`）、显式空名称（`invalid-name`）、本次加载中由声明拥有的 Session（`declared-binding`），以及不可达或拒绝握手的房间（`room-unreachable`、`room-rejected`）。写入绑定行之前，`bind` 会读取房间当前消息窗口，并把 `since` 基线设为其中最大的消息 id，因此新建绑定只投递绑定之后到达的消息，而不是房间积压的历史；已存在的行保留其存储游标。`unbind` 停止循环、删除 runtime 行，并拒绝 declared 绑定。
 
 `leave` 把已绑定的成员移出房间但保留绑定行：先停止循环，再以已加入的名称调用 `leave_room`，并把状态记为 `left`。`left` 行不再投递任何消息，直到 `rejoin` 重新加入房间并把 `since` 重置为房间当前最大的消息 id，因此离开期间的消息不会被补发；私密房间需要新的访问密钥，因为离开会销毁访客密钥。两种状态都能跨重载与 Host 重启保留，存储或声明中的 `left` 行都不会启动循环。Runtime 行在重载或 Host 重启后保留，并在插件报告就绪前恢复。
 
@@ -75,7 +75,7 @@ chatBridgeBinder:
       wake: idle-only
 ```
 
-仅 `url` 必填。`pollWaitSeconds` 默认 60 秒，`maxMessageBytes` 默认 16384，`bindTimeoutMs` 默认 15000，`reconnect` 默认为所示值；`bindings` 条目需要 `sessionId` 和 `cookie`，而 `agentName`、`since` 和 `wake` 可选。`wake` 接受 `idle-only`（默认）或 `always`。
+仅 `url` 必填。`pollWaitSeconds` 默认 60 秒，`maxMessageBytes` 默认 16384，`bindTimeoutMs` 默认 15000，`reconnect` 默认为所示值；`bindings` 条目需要 `sessionId` 和 `cookie`，而 `agentName`、`since` 和 `wake` 可选。`wake` 接受 `idle-only`（默认）或 `always`。`endpointRows` 指定服务地址编辑器要改写的 profile patch 行 id，默认为 `mcp-chat-bridge` 与 `chat-bridge-binder`。
 
 <a id="model-experience"></a>
 ## 模型体验
@@ -125,6 +125,6 @@ messages_json: {JSON array of the delivered messages}
 <details>
 <summary>维护者工作上下文——点击展开</summary>
 
-包测试在一个进程内 fake chat-bridge MCP 服务器（`tests/fake-room.ts`）上运行服务，该服务器复现真实的 `get_messages` wire 格式；另有一个带 fake Session 解析器与 flush spy 的 harness（`tests/harness.ts`）。Runtime API 与 Client 入口由 Host 侧的解析、绑定/解绑、离开/重新进入与重启恢复测试，以及 jsdom 中的会话头部表单、挂载接线与 Remote 转发测试覆盖。
+包测试在一个进程内 fake chat-bridge MCP 服务器（`tests/fake-room.ts`）上运行服务，该服务器复现真实的 `get_messages` wire 格式；另有一个带 fake Session 解析器与 flush spy 的 harness（`tests/harness.ts`）。Runtime API 与 Client 入口由 Host 侧的解析、绑定/解绑、离开/重新进入、重启恢复与 profile patch 服务地址改写测试，以及 jsdom 中的会话头部表单、挂载接线与 Remote 转发测试覆盖。
 
 </details>

@@ -46,6 +46,9 @@
       "path": "../../storage/storage-domain"
     },
     {
+      "path": "../../boot/app-boot"
+    },
+    {
       "path": "../../workspace/workspace"
     }
   ]

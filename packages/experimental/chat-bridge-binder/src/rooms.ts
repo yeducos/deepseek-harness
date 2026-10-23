@@ -8,6 +8,7 @@
  * @module
  */
 
+import { createHash } from 'node:crypto'
 import { BridgeConnection, BridgeToolError } from './mcp.ts'
 import type {
   ResolvedRoom, ResolveFailureCode, ResolveResult, RoomListResult, RoomSummary,
@@ -32,6 +33,19 @@ export function parseRoomList(text: string): readonly RoomSummary[] {
     })
   }
   return rooms
+}
+
+/**
+ * Web page for the room a cookie opens. The service derives a room's id from
+ * the first 16 hexadecimal characters of its cookie's SHA-256 and serves the
+ * WebUI under the MCP endpoint's origin, so the page needs no credential.
+ * @param url - chat-bridge MCP Streamable HTTP endpoint.
+ * @param cookie - Room credential whose room page is wanted.
+ * @returns Absolute WebUI URL of that room.
+ */
+export function roomPageUrl(url: string, cookie: string): string {
+  const roomId = createHash('sha256').update(cookie, 'utf8').digest('hex').slice(0, 16)
+  return new URL(`/room/${roomId}`, new URL(url).origin).toString()
 }
 
 /**

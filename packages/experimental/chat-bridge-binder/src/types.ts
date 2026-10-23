@@ -49,7 +49,40 @@ export interface Config {
   reconnect?: ReconnectConfig
   /** Durable Session-to-room bindings; removal of one deletes its stored row. */
   bindings?: BindingConfig[]
+  /**
+   * Profile patch row ids whose `config.url` the service-address editor
+   * rewrites; omission uses `mcp-chat-bridge` and `chat-bridge-binder`.
+   */
+  endpointRows?: string[]
 }
+
+/** The chat-bridge service address this Host loaded from its configuration. */
+export interface EndpointInfo {
+  /** Effective MCP Streamable HTTP endpoint of the running plugin. */
+  readonly url: string
+}
+
+/** Replace the chat-bridge service address in both profile patch rows. */
+export interface SetEndpointRequest {
+  /** New MCP Streamable HTTP endpoint; it must use http or https. */
+  readonly url: string
+}
+
+/**
+ * Why a service-address change was not persisted: the text is not an http or
+ * https URL, this launch has no readable profile patch, a configured row or its
+ * unique `url:` line is absent, or the rewritten file could not be written.
+ */
+export type SetEndpointFailureCode =
+  | 'invalid-url'
+  | 'profile-unavailable'
+  | 'row-missing'
+  | 'write-failed'
+
+/** Persisted service-address outcome; the running Host keeps its loaded address. */
+export type SetEndpointResult =
+  | { readonly ok: true; readonly url: string; readonly restartRequired: true }
+  | { readonly ok: false; readonly code: SetEndpointFailureCode }
 
 /** Where one binding came from: the deployment's cordis.yml or a live Session. */
 export type BindingSource = 'declared' | 'runtime'
@@ -77,6 +110,8 @@ export interface BindingView {
   readonly wake: WakeMode
   /** Declaration source. */
   readonly source: BindingSource
+  /** WebUI page of the bound room, opened by the panel's room action; it carries no credential. */
+  readonly roomUrl: string
 }
 
 /** Bind one live Session to a room at runtime. */

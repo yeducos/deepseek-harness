@@ -8,9 +8,9 @@ import type { BindingRow } from '../src/storage.ts'
 import { parseWireText, truncateBody } from '../src/wire.ts'
 import { renderChatBridgeFraming } from '../src/framing.ts'
 import { parseAppliedName } from '../src/runtime.ts'
-import { parseRoomList } from '../src/rooms.ts'
+import { parseRoomList, roomPageUrl } from '../src/rooms.ts'
 import { startFakeChatBridge, type FakeChatBridge } from './fake-room.ts'
-import { harness } from './harness.ts'
+import { agentFor, harness } from './harness.ts'
 import ChatBridgeBinderService, { type Config } from '../src/index.ts'
 import type { DomainFacility, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { MemoryMediaPool } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
@@ -670,6 +670,7 @@ it('binds a live Session at runtime without a declaration and wakes it', async (
     binding: {
       sessionId: SessionId('original'), agentName: 'AI-Worker-01', since: 0,
       status: 'active', wake: 'idle-only', source: 'runtime',
+      roomUrl: roomPageUrl(fake.url, 'runtime-cookie'),
     },
   })
   expect(table(test).get(BindingId('original'))).toMatchObject({
@@ -715,6 +716,7 @@ it('lists runtime bindings without exposing the room cookie', async () => {
   expect(rows).toEqual([{
     sessionId: SessionId('original'), agentName: 'AI-Worker-01', since: 0,
     status: 'active', wake: 'always', source: 'runtime',
+    roomUrl: roomPageUrl(fake.url, 'secret-cookie'),
   }])
   expect(JSON.stringify(rows)).not.toContain('secret-cookie')
 })
@@ -795,6 +797,31 @@ it('rejoins a room name that was already applied instead of claiming a new one',
   expect(result).toMatchObject({ ok: true, binding: { agentName: 'AI-Worker-07', source: 'runtime' } })
   expect(fake.state.applies).toBe(0)
   expect(fake.state.joined.get('runtime-cookie')).toBe('AI-Worker-07')
+})
+
+it('re-binds a Session under the name it already joined in the room', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' }))
+    .toMatchObject({ ok: true, binding: { agentName: 'AI-Worker-01' } })
+  expect(await test.service.unbind({ sessionId: 'original' })).toEqual({ ok: true, removed: true })
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' }))
+    .toMatchObject({ ok: true, binding: { agentName: 'AI-Worker-01' } })
+  expect(fake.state.applies).toBe(1)
+})
+
+it('remembers names per Session so another Session claims a fresh one', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  agentFor(test.ctx, 'other')
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' }))
+    .toMatchObject({ binding: { agentName: 'AI-Worker-01' } })
+  await test.service.unbind({ sessionId: 'original' })
+  expect(await test.service.bind({ sessionId: 'other', cookie: 'runtime-cookie' }))
+    .toMatchObject({ binding: { agentName: 'AI-Worker-02' } })
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' }))
+    .toMatchObject({ binding: { agentName: 'AI-Worker-01' } })
+  expect(fake.state.applies).toBe(2)
 })
 
 it('reports an unreachable room without landing the binding', async () => {
@@ -920,4 +947,68 @@ it('orders listed bindings by Session without reading room cookies', async () =>
   const rows = await test.service.list()
   expect(rows.map(row => row.sessionId)).toEqual([SessionId('original'), SessionId('other')])
   expect(JSON.stringify(rows)).not.toContain('runtime-cookie')
+})
+
+it('rejects access keys with line breaks and treats blank keys as absent', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  expect(await test.service.resolve({ value: 'faddba2498de6001', accessKey: 'a\nb' }))
+    .toEqual({ ok: false, code: 'invalid-value' })
+  expect(await test.service.resolve({ value: 'faddba2498de6001', accessKey: ' ' }))
+    .toMatchObject({ ok: true, room: { cookie: 'fixture-cookie' } })
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie', accessKey: 'a\nb' }))
+    .toEqual({ ok: false, code: 'invalid-cookie' })
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie', accessKey: '  ' }))
+    .toMatchObject({ ok: true, binding: { status: 'active' } })
+})
+
+it('baselines a re-bind after a leave at the current backlog', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  await test.service.leave({ sessionId: 'original' })
+  fake.push('AI-Worker-01', 'while away')
+  expect(await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' }))
+    .toMatchObject({ ok: true, binding: { status: 'active', since: 1 } })
+})
+
+it('keeps the binding watching when the room is unreachable during leave', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  // Let the first long poll park on the server, so the fault hits the leave call instead.
+  await tick(200)
+  fake.faults.rejectRequests = 1
+  expect(await test.service.leave({ sessionId: 'original' })).toEqual({ ok: false, code: 'room-unreachable' })
+  expect(table(test).get(BindingId('original'))).toMatchObject({ status: 'active' })
+})
+
+it('rejoins with a blank key and reports both rejoin refusals', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url, { bindings: [] }) })
+  await test.service.bind({ sessionId: 'original', cookie: 'runtime-cookie' })
+  await test.service.leave({ sessionId: 'original' })
+  // A blank key is absent, so the join handshake runs without one.
+  expect(await test.service.rejoin({ sessionId: 'original', accessKey: ' ' }))
+    .toMatchObject({ ok: true, binding: { status: 'active' } })
+  await test.service.leave({ sessionId: 'original' })
+  fake.faults.failJoins = 2
+  fake.faults.applyResponseText = '{"name":"AI-Worker-99"}'
+  expect(await test.service.rejoin({ sessionId: 'original' })).toEqual({ ok: false, code: 'room-rejected' })
+  fake.faults.rejectRequests = 1
+  expect(await test.service.rejoin({ sessionId: 'original' })).toEqual({ ok: false, code: 'room-unreachable' })
+  expect(table(test).get(BindingId('original'))).toMatchObject({ status: 'left' })
+})
+
+it('keeps a declared left binding out of the loops after a reload', async () => {
+  const fake = await fakeRoom()
+  const config = binderConfig(fake.url, { bindings: [{ sessionId: 'original', cookie: 'cookie-a', agentName: 'AI-Worker-90' }] })
+  const test = await harness({ agent: 'original', config })
+  expect(await test.service.leave({ sessionId: 'original' })).toEqual({ ok: true })
+  await test.fiber.dispose()
+  await test.ctx.plugin(ChatBridgeBinderService, config)
+  await vi.waitFor(() => { expect(table(test).get(BindingId('original'))).toMatchObject({ status: 'left', source: 'declared' }) })
+  fake.push('AI-Worker-90', 'after reload')
+  await tick(1500)
+  expect(test.agent?.followup).not.toHaveBeenCalled()
 })

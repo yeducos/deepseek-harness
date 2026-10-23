@@ -57,6 +57,16 @@ export async function mountBinding(ctx: Context, contribution: TypertRemoteContr
         if (!result.ok) throw result.error
         return result.value
       },
+      endpoint: async () => {
+        const result = await child.remote.chatBridgeBinder.endpoint()
+        if (!result.ok) throw result.error
+        return result.value
+      },
+      setEndpoint: async (request) => {
+        const result = await child.remote.chatBridgeBinder.setEndpoint(request)
+        if (!result.ok) throw result.error
+        return result.value
+      },
     })
     child.slots.inject('conversation.session.header.actions', () => child.slots.register({
       name: 'conversation.session.header.actions',

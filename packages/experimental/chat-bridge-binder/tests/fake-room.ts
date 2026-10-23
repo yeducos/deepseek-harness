@@ -62,6 +62,18 @@ export interface FakeChatBridge {
   close(): Promise<void>
 }
 
+/** Deterministic fixture options; every knob is fixed for the server's lifetime. */
+export interface FakeChatBridgeOptions {
+  /** Names the room has already applied. */
+  preApplied?: readonly string[]
+  /** Answer resolve_room with this text verbatim instead of the fixture resolution. */
+  resolveText?: (value: string, accessKey: string | undefined) => string
+  /** Answer every resolve_room call with this isError text. */
+  resolveError?: string
+  /** Leave resolve_room unregistered, as a server older than the resolver does. */
+  omitResolve?: boolean
+}
+
 /** Rooms the fake resolver answers for; the private one requires an access key. */
 const PUBLIC_ROOM = { roomId: 'faddba2498de6001', cookie: 'fixture-cookie' } as const
 const PRIVATE_ROOM = { roomId: 'deadbeefdeadbeef', cookie: 'fixture-private', accessKey: 'vk-test' } as const
@@ -114,7 +126,7 @@ function parseCookie(header: string | undefined): string | undefined {
  * format, get_messages long-polls (capped at two seconds) until a push or the
  * wait expires, and unread messages are never consumed server-side.
  */
-export async function startFakeChatBridge(options: { preApplied?: readonly string[] } = {}): Promise<FakeChatBridge> {
+export async function startFakeChatBridge(options: FakeChatBridgeOptions = {}): Promise<FakeChatBridge> {
   const state: FakeRoomState = {
     messages: [], names: new Set(options.preApplied ?? []), joined: new Map(), leftNames: [],
     applies: 0, nextName: 1,
@@ -171,10 +183,12 @@ export async function startFakeChatBridge(options: { preApplied?: readonly strin
       state.leftNames.push(name)
       return text(`成员 ${name} 已离开房间`)
     })
-    mcp.registerTool('resolve_room', {
+    if (options.omitResolve !== true) mcp.registerTool('resolve_room', {
       description: 'Resolves an invite link, room id, or cookie into a room cookie.',
       inputSchema: z.object({ value: z.string(), access_key: z.string().optional() }),
     }, async ({ value, access_key: providedKey }): Promise<CallToolResult> => {
+      if (options.resolveError !== undefined) return toolError(options.resolveError)
+      if (options.resolveText !== undefined) return text(options.resolveText(value, providedKey))
       const trimmed = value.trim()
       const urlKey = /[?&](?:key|access_key)=([^&]+)/.exec(trimmed)?.[1]
       const urlCookie = /[?&]cookie=([^&]+)/.exec(trimmed)?.[1]

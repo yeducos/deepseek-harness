@@ -13,37 +13,44 @@
  * @module @deepseek-ai/dsh-experimental-chat-bridge-binder
  */
 
+import { readFile } from 'node:fs/promises'
 import z from '@deepseek-ai/schemastery'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
+import type {} from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-workspace'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { BindingId } from './brand.ts'
+import { BindingId, NameMemoryId } from './brand.ts'
 import type { BindingId as BindingKey } from './brand.ts'
+import { DEFAULT_ENDPOINT_ROWS, rewriteEndpoint } from './endpoint.ts'
+import type { EndpointRewrite } from './endpoint.ts'
 import { resolveReconnectPolicy } from './reconnect.ts'
 import type { ResolvedReconnectPolicy } from './reconnect.ts'
 import { chatBridgeBinderDomain } from './storage.ts'
 import type { BindingRow } from './storage.ts'
 import { BindingLoop, checkRoom } from './runtime.ts'
-import { leaveRoom, listRooms, resolveRoom } from './rooms.ts'
+import { leaveRoom, listRooms, resolveRoom, roomPageUrl } from './rooms.ts'
+import { replaceFileAtomically } from './write.ts'
 import type {
-  BindRequest, BindResult, BindingSource, BindingStatus, BindingView, Config, LeaveRequest, LeaveResult,
+  BindRequest, BindResult, BindingSource, BindingStatus, BindingView, Config, EndpointInfo, LeaveRequest, LeaveResult,
   ReconnectConfig, RejoinRequest, RejoinResult, ResolveRequest, ResolveResult, RoomListResult,
-  UnbindRequest, UnbindResult, WakeMode,
+  SetEndpointRequest, SetEndpointResult, UnbindRequest, UnbindResult, WakeMode,
 } from './types.ts'
 
 export type {
   BindFailureCode, BindRequest, BindResult, BindingConfig, BindingSource, BindingStatus, BindingView,
-  Config, LeaveRequest, LeaveResult, ReconnectConfig, RejoinFailureCode, RejoinRequest, RejoinResult,
+  Config, EndpointInfo, LeaveRequest, LeaveResult, ReconnectConfig, RejoinFailureCode, RejoinRequest, RejoinResult,
   ResolvedRoom, ResolveFailureCode, ResolveRequest, ResolveResult, RoomListResult, RoomSummary,
-  UnbindRequest, UnbindResult, WakeMode,
+  SetEndpointFailureCode, SetEndpointRequest, SetEndpointResult, UnbindRequest, UnbindResult, WakeMode,
 } from './types.ts'
-export { BindingId }
-export { chatBridgeBinderDomain, bindingRowSchema } from './storage.ts'
-export type { BindingRow } from './storage.ts'
+export { BindingId, NameMemoryId } from './brand.ts'
+export { DEFAULT_ENDPOINT_ROWS, EndpointRewriteError, rewriteEndpoint } from './endpoint.ts'
+export type { EndpointRewrite } from './endpoint.ts'
+export { chatBridgeBinderDomain, bindingRowSchema, nameMemoryRowSchema } from './storage.ts'
+export type { BindingRow, NameMemoryRow } from './storage.ts'
 export { resolveReconnectPolicy, RECONNECT_DEFAULTS } from './reconnect.ts'
 export type { ResolvedReconnectPolicy } from './reconnect.ts'
 export { parseWireText, truncateBody } from './wire.ts'
@@ -121,9 +128,11 @@ export class ChatBridgeBinderService extends TypertRemoteService {
       since: z.number().step(1).min(0),
       wake: z.union(['idle-only', 'always'] as const).default('idle-only'),
     })),
+    endpointRows: z.array(z.string()).default([...DEFAULT_ENDPOINT_ROWS]),
   })
 
   private readonly url: string
+  private readonly endpointRows: readonly string[]
   private readonly pollWaitSeconds: number
   private readonly maxMessageBytes: number
   private readonly bindTimeoutMs: number
@@ -150,6 +159,10 @@ export class ChatBridgeBinderService extends TypertRemoteService {
       throw new Error('chat-bridge-binder: url must use http or https')
     }
     this.url = config.url
+    this.endpointRows = config.endpointRows ?? DEFAULT_ENDPOINT_ROWS
+    if (this.endpointRows.length === 0 || this.endpointRows.some(id => id.trim() === '')) {
+      throw new Error('chat-bridge-binder: endpointRows entries must not be empty')
+    }
     this.pollWaitSeconds = config.pollWaitSeconds ?? DEFAULT_POLL_WAIT_SECONDS
     this.maxMessageBytes = config.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES
     this.bindTimeoutMs = config.bindTimeoutMs ?? DEFAULT_BIND_TIMEOUT_MS
@@ -209,7 +222,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     const bindings = (await this.ready).table('bindings')
     return [...bindings.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([, row]) => viewOf(row))
+      .map(([, row]) => viewOf(row, this.url))
   }
 
   /**
@@ -220,6 +233,57 @@ export class ChatBridgeBinderService extends TypertRemoteService {
   @Remote
   async rooms(): Promise<RoomListResult> {
     return await listRooms(this.url, this.bindTimeoutMs)
+  }
+
+  /**
+   * Read the chat-bridge service address this Host loaded from its configuration.
+   * @returns the effective MCP endpoint of the running plugin.
+   */
+  @Remote
+  endpoint(): Promise<EndpointInfo> {
+    return Promise.resolve({ url: this.url })
+  }
+
+  /**
+   * Persist a new service address into every configured profile patch row. The
+   * running plugin keeps its loaded address, so the change takes effect on the
+   * next start; no loader reload or storage write happens here.
+   * @param request - the replacement endpoint, which must use http or https.
+   * @returns the persisted address with `restartRequired`, or the failure category.
+   */
+  @Remote
+  async setEndpoint(request: SetEndpointRequest): Promise<SetEndpointResult> {
+    const url = request.url.trim()
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return { ok: false, code: 'invalid-url' }
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return { ok: false, code: 'invalid-url' }
+    // Only a profile launch owns an editable patch file; other launches refuse the edit.
+    const profile = this.ctx.get('profileContext')
+    if (profile === undefined) return { ok: false, code: 'profile-unavailable' }
+    let source: string
+    try {
+      source = await readFile(profile.patchPath, 'utf8')
+    } catch {
+      return { ok: false, code: 'profile-unavailable' }
+    }
+    let rewritten: EndpointRewrite
+    try {
+      rewritten = rewriteEndpoint(source, url, this.endpointRows)
+    } catch {
+      return { ok: false, code: 'row-missing' }
+    }
+    if (rewritten.changed) {
+      try {
+        await replaceFileAtomically(profile.patchPath, rewritten.source)
+      } catch {
+        return { ok: false, code: 'write-failed' }
+      }
+    }
+    return { ok: true, url, restartRequired: true }
   }
 
   /**
@@ -241,7 +305,9 @@ export class ChatBridgeBinderService extends TypertRemoteService {
   /**
    * Bind one live Session to a room and start watching it. The room handshake
    * runs before anything durable changes, so a wrong credential leaves the
-   * existing binding untouched.
+   * existing binding untouched. Without an explicit name, the name this
+   * Session last joined in this room is retried first, so re-binding keeps the
+   * same member identity.
    * @param request - Session, room credential, optional name and wake scope.
    * @returns the new binding, or the refusal category.
    */
@@ -261,8 +327,13 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     const wake = request.wake ?? 'idle-only'
     const accessKey = request.accessKey?.trim()
     if (accessKey !== undefined && /[\r\n]/.test(accessKey)) return { ok: false, code: 'invalid-cookie' }
+    // A name this Session already used in this room re-enters as the same member;
+    // the handshake falls back to a fresh name when the room rejects it.
+    const names = (await this.ready).table('names')
+    const nameKey = NameMemoryId(bound, request.cookie)
     const checked = await checkRoom(
-      this.url, request.cookie, name, this.bindTimeoutMs, accessKey === '' ? undefined : accessKey,
+      this.url, request.cookie, name ?? names.get(nameKey)?.agentName,
+      this.bindTimeoutMs, accessKey === '' ? undefined : accessKey,
     )
     if (!checked.ok) return { ok: false, code: checked.reason === 'rejected' ? 'room-rejected' : 'room-unreachable' }
     // A member that left the room starts from the current backlog instead of replaying missed messages.
@@ -273,8 +344,10 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     }
     await this.stopLoop(key)
     await bindings.put(key, row)
+    // The memory outlives an unbind: the next bind in this room keeps the member name.
+    await names.put(nameKey, { agentName: checked.name })
     this.startLoop(row)
-    return { ok: true, binding: viewOf(row) }
+    return { ok: true, binding: viewOf(row, this.url) }
   }
 
   /**
@@ -350,7 +423,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     await this.stopLoop(key)
     await bindings.put(key, next)
     this.startLoop(next)
-    return { ok: true, binding: viewOf(next) }
+    return { ok: true, binding: viewOf(next, this.url) }
   }
 
   /** Upsert one row per declared binding and drop declared rows whose declaration was removed. */
@@ -454,10 +527,11 @@ export class ChatBridgeBinderService extends TypertRemoteService {
 }
 
 /** Project one durable row onto the credential-free runtime view. */
-function viewOf(row: BindingRow): BindingView {
+function viewOf(row: BindingRow, url: string): BindingView {
   return {
     sessionId: row.sessionId, agentName: row.agentName, since: row.since,
     status: row.status, wake: row.wake, source: row.source,
+    roomUrl: roomPageUrl(url, row.cookie),
   }
 }
 

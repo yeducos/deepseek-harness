@@ -15,8 +15,8 @@
   en: fc3a62323482bc13
   zh: e4fd574beec8d80d
 /deepseek-ai-dsh-experimental-chat-bridge-binder/bindings:
-  en: 28bb84f9c3ad5cce
-  zh: 8d98620345fc7b34
+  en: d9550502dfb1a1a2
+  zh: 1a996cf1c6a4d18a
 /deepseek-ai-dsh-experimental-chat-bridge-binder/poll-loop:
   en: 15aa734224daef83
   zh: b53f4ee0ca470c0a
@@ -27,8 +27,8 @@
   en: c227a268ff96c8dd
   zh: a7b3adad2c13eba2
 /deepseek-ai-dsh-experimental-chat-bridge-binder/composition:
-  en: 3a9e99610c465030
-  zh: c2c62ef457b424da
+  en: 62840a42a486e98c
+  zh: 543fe87dcbf073a6
 /deepseek-ai-dsh-experimental-chat-bridge-binder/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -51,5 +51,5 @@
   en: 8ed30d994ea2a52c
   zh: a03c1e5eb7bb6110
 /deepseek-ai-dsh-experimental-chat-bridge-binder/known-limitations-and-deferred-work/dev-note:
-  en: fe7bff8517effe31
-  zh: 4941dfd65bcd5337
+  en: d5597ffce4c2a5b8
+  zh: ae7b16c2a27745a8

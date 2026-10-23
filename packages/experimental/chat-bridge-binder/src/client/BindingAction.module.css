@@ -38,11 +38,17 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: 320px;
+  width: 336px;
   max-width: calc(100vw - 32px);
   padding: 14px;
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .title {
@@ -50,6 +56,16 @@
   font-size: 13px;
   font-weight: 600;
   line-height: 18px;
+}
+
+/* One identity line replaces the explanatory paragraph: unbound, or the joined member name. */
+.identity {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hint {
@@ -72,6 +88,12 @@
 }
 
 .fieldLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.sectionLabel {
   color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   line-height: 16px;
@@ -104,7 +126,7 @@
 .rooms {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .roomsHeader {
@@ -114,36 +136,75 @@
   gap: 8px;
 }
 
+/* The refresh action collapses to its glyph; the label lives in the accessible name. */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton:focus-visible {
+  background: var(--dsw-alias-fill-l2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.iconButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Three room rows stay visible; the rest scroll. */
 .roomList {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 132px;
+  gap: 2px;
+  max-height: 96px;
   margin: 0;
   padding: 0;
   overflow: auto;
   list-style: none;
 }
 
+/* The whole row is the entry target; the enter label only appears on hover or focus. */
 .roomRow {
   display: flex;
+  box-sizing: border-box;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 5px 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
+  border: 1px solid transparent;
   border-radius: var(--dsw-radius-sm);
-  background: var(--dsw-alias-bg-l1);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.roomBody {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.roomRow:hover:not(:disabled),
+.roomRow:focus-visible {
+  border-color: var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-fill-l2);
+}
+
+.roomRow:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .roomName {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
@@ -153,12 +214,24 @@
 }
 
 .roomMeta {
-  overflow: hidden;
+  flex-shrink: 0;
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
-  line-height: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 16px;
+}
+
+.roomEnter {
+  flex-shrink: 0;
+  color: var(--dsw-alias-brand-primary);
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.roomRow:hover .roomEnter,
+.roomRow:focus-visible .roomEnter {
+  opacity: 1;
 }
 
 .roomsNotice {
@@ -167,42 +240,69 @@
   line-height: 16px;
 }
 
-.boundName {
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  font-weight: 600;
+/* Secondary entry path: a text row that reveals the invite/cookie form. */
+.entryToggle,
+.advancedToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
 }
 
-.facts {
+.entryToggle {
+  width: 100%;
+  text-align: left;
+}
+
+.entryToggle:hover,
+.advancedToggle:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.chevron {
+  flex-shrink: 0;
+  transition: transform 120ms ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.advanced {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 0;
+  gap: 10px;
 }
 
-.actions {
+.metaLine {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-}
-
-.fact {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.fact dt,
-.fact dd {
-  margin: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   line-height: 16px;
 }
 
-.fact dt {
-  color: var(--dsw-alias-label-tertiary);
+/* The primary action stays on the panel's bottom edge. */
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-.fact dd {
-  color: var(--dsw-alias-label-secondary);
+/* Service-address editor at the panel's end; its value applies only after a restart. */
+.endpoint {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }

@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import type { BindingId } from './brand.ts'
+import type { BindingId, NameMemoryId } from './brand.ts'
 
 /**
  * Stored binding: one bound Session, its room credential, joined name, cursor,
@@ -24,10 +24,26 @@ export const bindingRowSchema = z.object({
 /** Persisted binding row. */
 export type BindingRow = z.infer<typeof bindingRowSchema>
 
+/**
+ * Remembered join name for one Session in one room. The row outlives the
+ * binding so re-binding after an unbind joins under the same member name
+ * instead of claiming a new one.
+ */
+export const nameMemoryRowSchema = z.object({
+  agentName: z.string().min(1),
+}).strict()
+
+/** Persisted name-memory row. */
+export type NameMemoryRow = z.infer<typeof nameMemoryRowSchema>
+
 /** Authoritative binder storage; malformed rows reject opening the domain. */
 export const chatBridgeBinderDomain = defineDomain({
-  // The `left` status widens an enum inside unchanged JSON, so the medium format
-  // keeps its version: the single layout rejects any stored version it did not write.
+  // The `left` status widens an enum inside unchanged JSON, and the `names`
+  // table only adds an absent-on-read table, so the medium format keeps its
+  // version: the single layout rejects any stored version it did not write.
   name: 'chat_bridge_binder', version: 1,
-  tables: { bindings: domainTable<BindingId, BindingRow>(bindingRowSchema) },
+  tables: {
+    bindings: domainTable<BindingId, BindingRow>(bindingRowSchema),
+    names: domainTable<NameMemoryId, NameMemoryRow>(nameMemoryRowSchema),
+  },
 })
