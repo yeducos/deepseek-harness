@@ -20,7 +20,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ServerContext } from './server-context.ts'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { createTransport } from './transport.ts'
+import { createTransport, watchSessionLoss } from './transport.ts'
 import { syncTools } from './tools.ts'
 import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
 import type { Config } from './index.ts'
@@ -293,6 +293,12 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       }
       return !attached || hasClosed() || await waitForClose(closed.promise)
     }
+    /**
+     * A server that no longer knows this session answers every request with a
+     * session error instead of closing the transport. Close it here so the
+     * established onclose path treats the session as lost and reconnects.
+     */
+    const onSessionLost = (): void => { void closeGeneration() }
     async function refreshTools(): Promise<void> {
       if (!isCurrent(generation)) return
       ctx.logger.info(`${label}: tool list changed, re-syncing`)
@@ -304,8 +310,9 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     }
     let instructions: string
     try {
-      transport = createTransport(config)
+      transport = createTransport(config, onSessionLost)
       await generation.connect(transport)
+      watchSessionLoss(transport, onSessionLost)
       if (hasClosed()) {
         attemptSettled = true
         generationDown(generation)

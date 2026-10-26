@@ -92,6 +92,8 @@ The server's tools appear before the harness starts its first turn. When the ser
 
 When a server connection drops — for example a local server process crashes — the plugin reconnects automatically with delays that double from 500 ms up to 30 s and then refreshes the tool set; reconnect progress is visible in the logs. During an outage the last known tools stay listed but calls to them fail until the server recovers. After ten consecutive failed attempts the server's tools are removed and reconnection stops until you reload the configuration or restart the harness; a server that stays connected for a while resets that counter. Set `reconnect.enabled: false` to disable automatic reconnection — tools then stay listed but fail until you reload. Editing the configuration entry reloads the server connection in place, and unchanged names stay unchanged.
 
+A Streamable HTTP server that restarts forgets the session it issued and answers with `Session not found` — HTTP 404 or a JSON-RPC error on an otherwise successful response. The plugin treats that answer as a dropped connection and opens a fresh session, so calls recover under the same reconnect policy instead of retrying against the dead session.
+
 -----
 
 <a id="understand-the-implementation"></a>

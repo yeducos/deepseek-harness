@@ -16,7 +16,11 @@ import type { Config } from '@deepseek-ai/dsh-mcp-client'
 
 // vi.mock factories are hoisted above every import/const, so the mock fns and
 // class must be created inside vi.hoisted to exist when the factories run.
-const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances } = vi.hoisted(() => {
+const {
+  mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler,
+  MockClient, instances, transports,
+} = vi.hoisted(() => {
+  const transports: Array<{ onmessage?: unknown; close: () => Promise<void> }> = []
   const mockConnect = vi.fn<() => Promise<void>>()
   const mockClose = vi.fn<() => Promise<void>>()
   const mockListTools = vi.fn<(_params?: Record<string, unknown>) => Promise<unknown>>()
@@ -40,7 +44,7 @@ const { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotification
     }
   }
   const instances: MockClient[] = []
-  return { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances }
+  return { mockConnect, mockClose, mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances, transports }
 })
 
 vi.mock('@modelcontextprotocol/client', async importOriginal => ({
@@ -50,7 +54,11 @@ vi.mock('@modelcontextprotocol/client', async importOriginal => ({
 }))
 
 vi.mock('@modelcontextprotocol/client/stdio', () => ({
-  StdioClientTransport: vi.fn(function () { return { close: () => Promise.resolve() } }),
+  StdioClientTransport: vi.fn(function () {
+    const transport: { onmessage?: unknown; close: () => Promise<void> } = { close: () => Promise.resolve() }
+    transports.push(transport)
+    return transport
+  }),
 }))
 
 // vi.mock is hoisted above static imports, so the modules under test see the
@@ -124,6 +132,7 @@ describe('reconnect supervisor', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     instances.length = 0
+    transports.length = 0
     mockConnect.mockResolvedValue(undefined)
     mockClose.mockImplementation(function (this: { onclose?: () => void }) {
       this.onclose?.()
@@ -208,6 +217,23 @@ describe('reconnect supervisor', () => {
     instances[0]!.onclose?.()
     await sleep(30)
     expect(instances).toHaveLength(2)
+  })
+
+  it('reconnects when the server reports a lost session without closing the transport', async () => {
+    const { warns } = captureLogs(ctx)
+    await apply(ctx, stdioConfig({ initialDelayMs: 5, maxDelayMs: 40, maxAttempts: 5 }))
+    await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
+    expect(instances).toHaveLength(1)
+
+    // Streamable HTTP servers answer a request from a forgotten session with
+    // this JSON-RPC error and keep the transport open: the supervisor must
+    // treat the message as a disconnect on its own.
+    const deliver = transports[0]!.onmessage as ((message: unknown) => void) | undefined
+    deliver?.({ jsonrpc: '2.0', id: 'server-error', error: { code: -32600, message: 'Session not found' } })
+
+    await vi.waitFor(() => { expect(instances).toHaveLength(2) })
+    await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
+    expect(warns.some(line => line.includes('connection lost; reconnecting in 5ms (attempt 1/5)'))).toBe(true)
   })
 
   it('stops at the failure cap, unregisters the tools, and reports final failure', async () => {
