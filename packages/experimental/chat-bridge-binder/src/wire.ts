@@ -86,6 +86,20 @@ function truncationMarker(maxBytes: number): string {
 }
 
 /**
+ * Read one member's acknowledged cursor from `list_members` text, whose rows
+ * look like `  <name> | display_name=... | last_read_id=12 | ...`. A member the
+ * listing omits has acknowledged nothing.
+ * @param text - Exact text from the `list_members` tool.
+ * @param name - Joined room name of the bound member.
+ * @returns The largest message id the member confirmed processing, or 0.
+ */
+export function parseMemberLastReadId(text: string, name: string): number {
+  const line = text.split('\n').find(candidate => candidate.trimStart().startsWith(`${name} |`))
+  const match = line === undefined ? null : /last_read_id=(\d+)/.exec(line)
+  return match === null ? 0 : Number(match[1])
+}
+
+/**
  * Bound one message body to `maxBytes` UTF-8 bytes, cutting at a code-point
  * boundary and appending a visible truncation marker. Bodies within the
  * budget return unchanged.

@@ -5,9 +5,9 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { BindingId } from '../src/brand.ts'
 import { chatBridgeBinderDomain } from '../src/storage.ts'
 import type { BindingRow } from '../src/storage.ts'
-import { parseWireText, truncateBody } from '../src/wire.ts'
+import { parseMemberLastReadId, parseWireText, truncateBody } from '../src/wire.ts'
 import { renderChatBridgeFraming } from '../src/framing.ts'
-import { parseAppliedName } from '../src/runtime.ts'
+import { parseAppliedName, parseJoinedRoomName } from '../src/runtime.ts'
 import { parseRoomList, roomPageUrl } from '../src/rooms.ts'
 import { startFakeChatBridge, type FakeChatBridge } from './fake-room.ts'
 import { agentFor, harness } from './harness.ts'
@@ -122,6 +122,24 @@ it('extracts the applied name from the apply payload', () => {
   expect(() => parseAppliedName('{}')).toThrow('no room name')
 })
 
+it('extracts the room display name from the join intro', () => {
+  const joined = '已加入房间 6ca13d52ca70c883「打龙战斗协作」\n  type=public\n  name=AI-Server-01'
+  expect(parseJoinedRoomName(joined)).toBe('打龙战斗协作')
+  expect(parseJoinedRoomName('已加入房间 6ca13d52ca70c883\n  name=AI-Server-01')).toBeUndefined()
+  expect(parseJoinedRoomName('已加入房间，当前发言权: free')).toBeUndefined()
+})
+
+it('reads a member acknowledged cursor from list_members text', () => {
+  const listing = [
+    '房间 room-1 成员：',
+    '  AI-Server-02 | display_name=审查者 | type=ai | identity=测试 | permission=other(其他/只读) | priority=normal | online=true | last_read_id=49 | unread=0',
+    '  AI-Server-01 | display_name=实现者 | type=ai | identity=测试 | permission=other(其他/只读) | priority=normal | online=true | last_read_id=12 | unread=0',
+  ].join('\n')
+  expect(parseMemberLastReadId(listing, 'AI-Server-02')).toBe(49)
+  expect(parseMemberLastReadId(listing, 'AI-Server-01')).toBe(12)
+  expect(parseMemberLastReadId(listing, 'AI-Server-03')).toBe(0)
+})
+
 it('parses the real list_rooms text into room rows', () => {
   expect(parseRoomList([
     '公共房间列表：',
@@ -154,9 +172,42 @@ it('wakes the bound Session with the addressed message and commits the cursor', 
   await vi.waitFor(() => {
     expect(table(test).get(BindingId('original'))).toEqual({
       sessionId: SessionId('original'), agentName: 'AI-Worker-01', cookie: 'cookie-a', since: 1, status: 'active',
-      source: 'declared', wake: 'idle-only',
+      source: 'declared', wake: 'idle-only', roomName: '测试房间',
     } satisfies BindingRow)
   })
+})
+
+it('records the joined room name while the room stays idle', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url) })
+  await vi.waitFor(() => {
+    expect(table(test).get(BindingId('original'))?.roomName).toBe('测试房间')
+  })
+  expect(fake.state.messages).toHaveLength(0)
+  expect(test.agent?.followup).not.toHaveBeenCalled()
+})
+
+it('defers delivery while the Session runs and delivers once it goes idle', async () => {
+  const fake = await fakeRoom()
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url) })
+  await vi.waitFor(() => { expect(fake.state.joined.get('cookie-a')).toBe('AI-Worker-01') })
+  Object.assign(test.agent!, { status: 'running' })
+  fake.push('AI-Server-01', 'hello')
+  await tick(200)
+  expect(test.agent!.followup).not.toHaveBeenCalled()
+  expect(table(test).get(BindingId('original'))?.since).toBe(0)
+  Object.assign(test.agent!, { status: 'idle' })
+  await vi.waitFor(() => { expect(test.agent!.followup).toHaveBeenCalledTimes(1) })
+  await vi.waitFor(() => { expect(table(test).get(BindingId('original'))?.since).toBe(1) })
+})
+
+it('skips messages the Session already acknowledged through its own reads', async () => {
+  const fake = await fakeRoom()
+  fake.push('AI-Server-01', 'already handled')
+  fake.state.readCursors.set('AI-Worker-01', 1)
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url) })
+  await vi.waitFor(() => { expect(table(test).get(BindingId('original'))?.since).toBe(1) })
+  expect(test.agent!.followup).not.toHaveBeenCalled()
 })
 
 it('delivers a multi-message batch as one followup', async () => {
@@ -172,6 +223,18 @@ it('delivers a multi-message batch as one followup', async () => {
     { id: 2, sender: 'AI-Server-02', sentAt: '2026-01-01T00:00:02.000+00:00', body: 'two' },
   ])
   await vi.waitFor(() => { expect(table(test).get(BindingId('original'))?.since).toBe(2) })
+})
+
+it('does not spin when the server answers every poll without a message or cursor', async () => {
+  const fake = await fakeRoom()
+  fake.faults.getMessagesText = () => '[轮询结果] 无新消息，请继续轮询'
+  const test = await harness({ agent: 'original', config: binderConfig(fake.url) })
+  await vi.waitFor(() => { expect(fake.state.joined.get('cookie-a')).toBe('AI-Worker-01') })
+  const before = fake.requests
+  await tick(300)
+  const polls = fake.requests - before
+  expect(polls).toBeLessThan(5)
+  await test.fiber.dispose()
 })
 
 it('resumes from the stored cursor across a restart without redelivery', async () => {
@@ -210,7 +273,7 @@ it('upserts declared bindings with declared identity and stored cursor', async (
   await vi.waitFor(() => { expect(fake.state.joined.get('cookie-new')).toBe('AI-Worker-90') })
   expect(table(test).get(BindingId('original'))).toEqual({
     sessionId: SessionId('original'), agentName: 'AI-Worker-90', cookie: 'cookie-new', since: 7, status: 'active',
-    source: 'declared', wake: 'idle-only',
+    source: 'declared', wake: 'idle-only', roomName: '测试房间',
   } satisfies BindingRow)
 })
 
@@ -671,6 +734,7 @@ it('binds a live Session at runtime without a declaration and wakes it', async (
       sessionId: SessionId('original'), agentName: 'AI-Worker-01', since: 0,
       status: 'active', wake: 'idle-only', source: 'runtime',
       roomUrl: roomPageUrl(fake.url, 'runtime-cookie'),
+      roomName: '测试房间',
     },
   })
   expect(table(test).get(BindingId('original'))).toMatchObject({
@@ -717,6 +781,7 @@ it('lists runtime bindings without exposing the room cookie', async () => {
     sessionId: SessionId('original'), agentName: 'AI-Worker-01', since: 0,
     status: 'active', wake: 'always', source: 'runtime',
     roomUrl: roomPageUrl(fake.url, 'secret-cookie'),
+    roomName: '测试房间',
   }])
   expect(JSON.stringify(rows)).not.toContain('secret-cookie')
 })

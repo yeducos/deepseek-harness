@@ -9,7 +9,8 @@ import type { BindingId, NameMemoryId } from './brand.ts'
  * Stored binding: one bound Session, its room credential, joined name, cursor,
  * wake scope, and where the binding came from. Rows written before `source`
  * and `wake` existed parse as declared `idle-only` bindings, which is what
- * every such row was.
+ * every such row was. `roomName` is absent on rows written before the join
+ * handshake reported it; the next poll fills it in.
  */
 export const bindingRowSchema = z.object({
   sessionId: z.string().min(1).transform(SessionId),
@@ -19,6 +20,7 @@ export const bindingRowSchema = z.object({
   status: z.enum(['active', 'stopped', 'left']).default('active'),
   source: z.enum(['declared', 'runtime']).default('declared'),
   wake: z.enum(['idle-only', 'always']).default('idle-only'),
+  roomName: z.string().min(1).optional(),
 }).strict()
 
 /** Persisted binding row. */

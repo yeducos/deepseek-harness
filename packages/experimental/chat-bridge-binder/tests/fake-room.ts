@@ -22,6 +22,8 @@ export interface FakeRoomState {
   readonly names: Set<string>
   /** Name joined per room cookie, for assertions. */
   readonly joined: Map<string, string>
+  /** Acknowledged read cursor per member name, rendered by `list_members`. */
+  readonly readCursors: Map<string, number>
   /** Names whose leave_room call reached the fake, in order. */
   readonly leftNames: string[]
   /** Number of apply_agent_name calls so far. */
@@ -128,8 +130,8 @@ function parseCookie(header: string | undefined): string | undefined {
  */
 export async function startFakeChatBridge(options: FakeChatBridgeOptions = {}): Promise<FakeChatBridge> {
   const state: FakeRoomState = {
-    messages: [], names: new Set(options.preApplied ?? []), joined: new Map(), leftNames: [],
-    applies: 0, nextName: 1,
+    messages: [], names: new Set(options.preApplied ?? []), joined: new Map(), readCursors: new Map(),
+    leftNames: [], applies: 0, nextName: 1,
   }
   const faults: FakeFaults = {
     rejectRequests: 0, terminateSessions: 0, failJoins: 0, textlessJoins: 0,
@@ -173,7 +175,7 @@ export async function startFakeChatBridge(options: FakeChatBridgeOptions = {}): 
       }
       if (!state.names.has(name)) return toolError(`名字 ${name} 未申请`)
       if (currentCookie !== undefined) state.joined.set(currentCookie, name)
-      return text('已加入房间，当前发言权: free')
+      return text(`已加入房间 room-1「测试房间」\n  name=${name}\n  room_id=room-1 name=测试房间 active_messages=${state.messages.length}`)
     })
     mcp.registerTool('leave_room', {
       description: 'Leaves the room under a name.',
@@ -182,6 +184,20 @@ export async function startFakeChatBridge(options: FakeChatBridgeOptions = {}): 
       if (name === undefined) return toolError('leave_room requires a name')
       state.leftNames.push(name)
       return text(`成员 ${name} 已离开房间`)
+    })
+    mcp.registerTool('list_members', {
+      description: 'Lists room members with their acknowledged read cursors.',
+      inputSchema: z.object({ cookie: z.string().optional() }),
+    }, async (): Promise<CallToolResult> => {
+      const lines = ['房间 room-1 成员：']
+      for (const name of [...new Set(state.joined.values())]) {
+        lines.push(
+          `  ${name} | display_name=${name} | type=ai | identity=测试 | permission=technical(技术) `
+          + `| priority=normal | online=true | last_read_id=${state.readCursors.get(name) ?? 0} `
+          + '| unread=0 | unread_human=0 | last_seen=2026-01-01T00:00:00+00:00 | idle_seconds=0',
+        )
+      }
+      return text(lines.join('\n'))
     })
     if (options.omitResolve !== true) mcp.registerTool('resolve_room', {
       description: 'Resolves an invite link, room id, or cookie into a room cookie.',

@@ -20,11 +20,29 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { BridgeConnection, BridgeToolError } from './mcp.ts'
 import { renderChatBridgeFraming } from './framing.ts'
-import { parseWireText, truncateBody } from './wire.ts'
+import { parseMemberLastReadId, parseWireText, truncateBody } from './wire.ts'
 import type { ResolvedReconnectPolicy } from './reconnect.ts'
 import type { BindingRow } from './storage.ts'
 import type { BindingSource, BridgeMessage, WakeMode } from './types.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+
+/**
+ * Floor between polls when the server returned neither a message nor a cursor
+ * advance. A server that filters a read after its long poll answers such a
+ * request immediately; without this pause one invisible message would become a
+ * request storm for as long as it stays above the cursor.
+ */
+const EMPTY_POLL_FLOOR_MS = 1_000
+
+/**
+ * Floor between polls while a running Session keeps a batch deferred. The room
+ * answers a non-empty backlog immediately, so without this pause the loop would
+ * poll in a tight cycle for the whole turn.
+ */
+const BUSY_POLL_FLOOR_MS = 1_000
+
+/** Result of one delivery attempt against the bound Session. */
+type DeliveryOutcome = 'delivered' | 'deferred' | 'stopped'
 
 /** Human-readable reason for logging, without any credential material. */
 function describeError(error: unknown): string {
@@ -51,6 +69,19 @@ export function parseAppliedName(payload: string): string {
   return name
 }
 
+/**
+ * Extract the room display name from the `join_room` intro line, which the
+ * chat-bridge server formats as `已加入房间 <id>「<room name>」`; unnamed rooms
+ * omit the quoted part.
+ * @param payload - The tool's text content.
+ * @returns The room display name, or undefined when the payload carries none.
+ */
+export function parseJoinedRoomName(payload: string): string | undefined {
+  const match = /^已加入房间[^\n「]*「(.+?)」/m.exec(payload)
+  const name = match?.[1]?.trim()
+  return name === undefined || name.length === 0 ? undefined : name
+}
+
 /** Resolved inputs for one binding's loop. */
 export interface BindingLoopOptions {
   /** Host services used to resolve, wake, and flush the bound Session. */
@@ -63,6 +94,8 @@ export interface BindingLoopOptions {
   readonly cookie: string
   /** Declared or stored room name tried before applying for a new one. */
   readonly initialName: string | undefined
+  /** Room display name already stored on the binding, when known. */
+  readonly initialRoomName?: string | undefined
   /** Cursor the first poll starts from. */
   readonly initialSince: number
   /** Long-poll duration per get_messages call, in seconds. */
@@ -86,6 +119,7 @@ export class BindingLoop {
   private stopping = false
   private failures = 0
   private joinedName: string | undefined
+  private roomName: string | undefined
   private since: number
   private done: Promise<void> | undefined
 
@@ -95,6 +129,7 @@ export class BindingLoop {
   constructor(private readonly options: BindingLoopOptions) {
     this.connection = new BridgeConnection(options.url, options.cookie)
     this.since = options.initialSince
+    this.roomName = options.initialRoomName
   }
 
   /** Begin the loop once; the promise settles when the loop stops or gives up. */
@@ -152,7 +187,13 @@ export class BindingLoop {
       .filter((name): name is string => name !== undefined))]
     for (const name of candidates) {
       try {
-        await this.call('join_room', { name })
+        const learned = parseJoinedRoomName(await this.call('join_room', { name }))
+        // An idle room never advances the cursor, so persist a newly learned display
+        // name at join time; otherwise the trigger would stay unnamed until a message arrives.
+        if (learned !== undefined && learned !== this.roomName) {
+          this.roomName = learned
+          await this.options.commit(this.row(name, this.since))
+        }
         return name
       } catch (error) {
         // A name that was never applied falls back to the apply flow; transport failures propagate.
@@ -162,7 +203,7 @@ export class BindingLoop {
     }
     const applied = await this.call('apply_agent_name', { role: 'Server' })
     const name = parseAppliedName(applied)
-    await this.call('join_room', { name })
+    this.roomName = parseJoinedRoomName(await this.call('join_room', { name })) ?? this.roomName
     await this.options.commit(this.row(name, this.since))
     return name
   }
@@ -198,26 +239,52 @@ export class BindingLoop {
     const deliverable = parsed.messages.filter(message =>
       message.id > this.since
       && (this.options.wake === 'idle-only' || message.target === reader))
-    if (deliverable.length > 0 && !await this.deliver(reader, deliverable)) return false
-    if (parsed.maxSeenId > this.since) await this.commit(reader, parsed.maxSeenId)
+    if (deliverable.length > 0) {
+      const outcome = await this.deliver(reader, deliverable)
+      if (outcome === 'stopped') return false
+      // A running Session may already be reading these messages through its own
+      // chat-bridge tools; keep the cursor behind and retry when it goes idle
+      // instead of queueing a follow-up turn that re-handles the same batch.
+      if (outcome === 'deferred') return this.sleep(BUSY_POLL_FLOOR_MS)
+    }
+    if (parsed.maxSeenId > this.since) {
+      await this.commit(reader, parsed.maxSeenId)
+    } else if (parsed.messages.length === 0) {
+      if (!await this.sleep(EMPTY_POLL_FLOOR_MS)) return false
+    }
     return true
   }
 
-  /** Wake the bound Session with one merged followup; the cursor commits only after flush. */
-  private async deliver(reader: string, messages: readonly BridgeMessage[]): Promise<boolean> {
+  /**
+   * Wake the bound Session with one merged followup; the cursor commits only after
+   * flush. A running Session defers delivery, and messages it already confirmed
+   * through `mark_messages_read` are skipped so its own reads are not replayed.
+   */
+  private async deliver(reader: string, messages: readonly BridgeMessage[]): Promise<DeliveryOutcome> {
     const { ctx, sessionId, maxMessageBytes } = this.options
-    const bounded = messages.map(message => ({ ...message, body: truncateBody(message.body, maxMessageBytes) }))
-    const text = renderChatBridgeFraming(reader, bounded)
-    await ctx.agents.withoutInitiator(async () => {
+    return ctx.agents.withoutInitiator(async (): Promise<DeliveryOutcome> => {
       const resolved = await ctx.sessionController.resolveAgent(sessionId)
       if ('error' in resolved) throw resolved.error
       // Disposal can land while Session restoration is awaited.
-      if (this.stopping) return
-      resolved.agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'chat-bridge' } }))
+      if (this.stopping) return 'stopped'
+      if (resolved.agent.status === 'running') {
+        ctx.logger.debug(`chat-bridge-binder: deferring ${messages.length} room message(s) for Session "${sessionId}" while it runs`)
+        return 'deferred'
+      }
+      const acknowledged = parseMemberLastReadId(
+        await this.call('list_members', { cookie: this.options.cookie }), reader,
+      )
+      const pending = messages.filter(message => message.id > acknowledged)
+      if (pending.length === 0) return 'delivered'
+      const bounded = pending.map(message => ({ ...message, body: truncateBody(message.body, maxMessageBytes) }))
+      resolved.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: renderChatBridgeFraming(reader, bounded) }],
+        source: { kind: 'chat-bridge' },
+      }))
       const flushed = await ctx.sessions.flush(resolved.agent.session)
       if (!flushed) throw new Error('Session persistence did not acknowledge the chat-bridge wake delivery')
+      return 'delivered'
     })
-    return !this.stopping
   }
 
   /** Durable cursor write; the in-memory cursor moves only after the row lands. */
@@ -231,6 +298,7 @@ export class BindingLoop {
     return {
       sessionId: this.options.sessionId, agentName, cookie: this.options.cookie,
       since, status: 'active', source: this.options.source, wake: this.options.wake,
+      ...(this.roomName === undefined ? {} : { roomName: this.roomName }),
     }
   }
 
@@ -252,7 +320,13 @@ export class BindingLoop {
 
 /** Pre-bind room handshake outcome: the joined name and baseline cursor, or why the room refused it. */
 export type RoomCheck =
-  | { readonly ok: true; readonly name: string; readonly since: number }
+  | {
+    readonly ok: true
+    readonly name: string
+    readonly since: number
+    /** Room display name reported by the join handshake, when the room has one. */
+    readonly roomName?: string
+  }
   | { readonly ok: false; readonly reason: 'unreachable' | 'rejected' }
 
 /**
@@ -277,20 +351,19 @@ export async function checkRoom(
 ): Promise<RoomCheck> {
   const connection = new BridgeConnection(url, cookie)
   const signal = new AbortController().signal
-  const join = async (member: string): Promise<void> => {
-    await connection.call(
-      'join_room',
-      accessKey === undefined ? { name: member } : { name: member, access_key: accessKey },
-      timeoutMs,
-      signal,
-    )
-  }
+  const join = async (member: string): Promise<string> => connection.call(
+    'join_room',
+    accessKey === undefined ? { name: member } : { name: member, access_key: accessKey },
+    timeoutMs,
+    signal,
+  )
   try {
     await connection.connect()
     let joined = name
+    let roomName: string | undefined
     if (joined !== undefined) {
       try {
-        await join(joined)
+        roomName = parseJoinedRoomName(await join(joined))
       } catch {
         // A name the room never applied, or a refused join, falls back to applying a fresh one.
         joined = undefined
@@ -299,12 +372,15 @@ export async function checkRoom(
     if (joined === undefined) {
       const applied = await connection.call('apply_agent_name', { role: 'Server' }, timeoutMs, signal)
       joined = parseAppliedName(applied)
-      await join(joined)
+      roomName = parseJoinedRoomName(await join(joined))
     }
     const window = await connection.call(
       'get_messages', { since: 0, wait_seconds: 0, for_member: joined, reader: joined }, timeoutMs, signal,
     )
-    return { ok: true, name: joined, since: parseWireText(window).maxSeenId }
+    return {
+      ok: true, name: joined, since: parseWireText(window).maxSeenId,
+      ...(roomName === undefined ? {} : { roomName }),
+    }
   } catch (error) {
     return { ok: false, reason: error instanceof BridgeToolError ? 'rejected' : 'unreachable' }
   } finally {

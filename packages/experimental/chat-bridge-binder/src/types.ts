@@ -100,8 +100,10 @@ export type BindingStatus = 'active' | 'stopped' | 'left'
 export interface BindingView {
   /** Bound Session identity. */
   readonly sessionId: string
-  /** Room name the binding joined, or applied for on its first connect. */
+  /** Member name the binding joined, or applied for on its first connect. */
   readonly agentName: string
+  /** Display name of the bound room, once the join handshake has reported it. */
+  readonly roomName?: string
   /** Cursor the next poll starts from. */
   readonly since: number
   /** Whether the binding is currently watching the room. */

@@ -373,7 +373,9 @@ export function BindingAction({
 
   const label = binding === null || binding === undefined
     ? t('trigger')
-    : t('trigger.bound', { name: binding.agentName })
+    : binding.roomName === undefined
+      ? t('trigger.boundUnnamed', { name: binding.agentName })
+      : t('trigger.bound', { room: binding.roomName, name: binding.agentName })
 
   const statusKey = binding === null || binding === undefined
     ? 'status.active'

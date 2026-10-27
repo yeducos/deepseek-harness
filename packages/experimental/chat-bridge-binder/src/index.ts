@@ -88,6 +88,7 @@ const Reconnect: z<ReconnectConfig> = z.object({
 interface LoopSeed {
   readonly sessionId: SessionId
   readonly agentName: string | undefined
+  readonly roomName?: string | undefined
   readonly cookie: string
   readonly since: number
   readonly status: BindingStatus
@@ -341,6 +342,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
     const row: BindingRow = {
       sessionId: bound, agentName: checked.name, cookie: request.cookie,
       since, status: 'active', source: 'runtime', wake,
+      ...(checked.roomName === undefined ? {} : { roomName: checked.roomName }),
     }
     await this.stopLoop(key)
     await bindings.put(key, row)
@@ -419,7 +421,10 @@ export class ChatBridgeBinderService extends TypertRemoteService {
       this.url, row.cookie, row.agentName, this.bindTimeoutMs, accessKey === '' ? undefined : accessKey,
     )
     if (!checked.ok) return { ok: false, code: checked.reason === 'rejected' ? 'room-rejected' : 'room-unreachable' }
-    const next: BindingRow = { ...row, agentName: checked.name, since: checked.since, status: 'active' }
+    const next: BindingRow = {
+      ...row, agentName: checked.name, since: checked.since, status: 'active',
+      ...(checked.roomName === undefined ? {} : { roomName: checked.roomName }),
+    }
     await this.stopLoop(key)
     await bindings.put(key, next)
     this.startLoop(next)
@@ -441,6 +446,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
         sessionId: plan.sessionId, agentName, cookie: plan.cookie,
         since: stored?.since ?? plan.since ?? 0,
         status: stored?.status === 'left' ? 'left' : 'active', source: 'declared', wake: plan.wake,
+        ...(stored?.roomName === undefined ? {} : { roomName: stored.roomName }),
       })
     }
     for (const [key, row] of bindings.entries()) {
@@ -459,6 +465,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
       this.startLoop({
         sessionId: plan.sessionId, agentName: plan.agentName ?? stored?.agentName, cookie: plan.cookie,
         since: stored?.since ?? plan.since ?? 0, status: 'active', source: 'declared', wake: plan.wake,
+        ...(stored?.roomName === undefined ? {} : { roomName: stored.roomName }),
       })
     }
   }
@@ -482,6 +489,7 @@ export class ChatBridgeBinderService extends TypertRemoteService {
       url: this.url,
       cookie: seed.cookie,
       initialName: seed.agentName,
+      initialRoomName: seed.roomName,
       initialSince: seed.since,
       pollWaitSeconds: this.pollWaitSeconds,
       maxMessageBytes: this.maxMessageBytes,
@@ -532,6 +540,7 @@ function viewOf(row: BindingRow, url: string): BindingView {
     sessionId: row.sessionId, agentName: row.agentName, since: row.since,
     status: row.status, wake: row.wake, source: row.source,
     roomUrl: roomPageUrl(url, row.cookie),
+    ...(row.roomName === undefined ? {} : { roomName: row.roomName }),
   }
 }
 
