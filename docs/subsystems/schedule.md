@@ -172,9 +172,35 @@ Durable chat-bridge room bindings that wake bound Sessions.
 @Remote async rooms(): Promise<RoomListResult>
 
 /**
+ * Read the chat-bridge service address this Host loaded from its configuration.
+ * @returns the effective MCP endpoint of the running plugin.
+ */
+@Remote endpoint(): Promise<EndpointInfo>
+
+/**
+ * Persist a new service address into every configured profile patch row. The
+ * running plugin keeps its loaded address, so the change takes effect on the
+ * next start; no loader reload or storage write happens here.
+ * @param request - the replacement endpoint, which must use http or https.
+ * @returns the persisted address with `restartRequired`, or the failure category.
+ */
+@Remote async setEndpoint(request: SetEndpointRequest): Promise<SetEndpointResult>
+
+/**
+ * Turn an invite link, a room id, or a room cookie into the cookie a bind
+ * needs. Selecting a listed room and pasting an invite link both take this
+ * path; a private room answers only under a valid access key.
+ * @param request - The room reference as entered, plus an optional access key.
+ * @returns the resolved room with its cookie, or the refusal category.
+ */
+@Remote async resolve(request: ResolveRequest): Promise<ResolveResult>
+
+/**
  * Bind one live Session to a room and start watching it. The room handshake
  * runs before anything durable changes, so a wrong credential leaves the
- * existing binding untouched.
+ * existing binding untouched. Without an explicit name, the name this
+ * Session last joined in this room is retried first, so re-binding keeps the
+ * same member identity.
  * @param request - Session, room credential, optional name and wake scope.
  * @returns the new binding, or the refusal category.
  */
@@ -186,6 +212,24 @@ Durable chat-bridge room bindings that wake bound Sessions.
  * @returns whether a row was removed, or that declarations own the binding.
  */
 @Remote async unbind(request: UnbindRequest): Promise<UnbindResult>
+
+/**
+ * Remove the bound member from its room and keep the binding. The Session
+ * stops receiving room messages until it rejoins; polling stops first so the
+ * loop cannot race the leave with a fresh apply for a name.
+ * @param request - Session whose bound member leaves its room.
+ * @returns whether the member left, was already gone, or the room was unreachable.
+ */
+@Remote async leave(request: LeaveRequest): Promise<LeaveResult>
+
+/**
+ * Re-enter the room of a binding whose member left. The join handshake runs
+ * first, then the cursor resets to the room's current backlog so re-entering
+ * does not replay messages missed while away.
+ * @param request - Session whose binding re-enters, plus a fresh private-room key.
+ * @returns the active binding, or the refusal category.
+ */
+@Remote async rejoin(request: RejoinRequest): Promise<RejoinResult>
 ```
 
 Source: [`packages/experimental/chat-bridge-binder/src/index.ts`](../../packages/experimental/chat-bridge-binder/src/index.ts)

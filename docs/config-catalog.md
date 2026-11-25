@@ -1283,6 +1283,11 @@ export interface Config {
   reconnect?: ReconnectConfig
   /** Durable Session-to-room bindings; removal of one deletes its stored row. */
   bindings?: BindingConfig[]
+  /**
+   * Profile patch row ids whose `config.url` the service-address editor
+   * rewrites; omission uses `mcp-chat-bridge` and `chat-bridge-binder`.
+   */
+  endpointRows?: string[]
 }
 
 /** Automatic reconnect policy for one binding's MCP connection. */

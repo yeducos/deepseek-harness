@@ -27,20 +27,20 @@ id: 2026-10-21-chat-bridge-source
 baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "e3493f045e3cdaa640ae28695a54ade47dfa5dae2faf9b3dbdac28531d0db1d6"
+    previous: "2026-11-19-cua-input-notices"
+    after: "39ac243031bb9db1fec350ab1195478897d24d96e05178ba9e4b92c9807f3fe3"
     decision: same-version
   - root: "event:developer/message"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "e2f3beac27e403f70de26b5d2310438ab6f3b1e76b9eff9e8ba2292628874da8"
+    previous: "2026-11-19-cua-input-notices"
+    after: "25b6678bf6d613ea82bf389b5d7e2c8ad2e2e3c613a276ffd27cef943f4b4b6a"
     decision: same-version
   - root: "event:session/title-llm-request"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "d3a28006e4a2ded271f23250b746abf446daee0c3f8cfb32302b203ec7f9e308"
+    previous: "2026-11-19-cua-input-notices"
+    after: "5f5130b39cf41cbec81f76c8d6a34e983c39141c6ab2cb70918677f99941f348"
     decision: same-version
   - root: "event:user/message"
-    previous: "2026-10-13-user-rpc-principal"
-    after: "b651642d366d8b3af02ce2fa3dea1e63eba2ee49619c52de0f9ed21d4249a646"
+    previous: "2026-11-19-cua-input-notices"
+    after: "ea8eda6e8defc9ef3e14ac0deb68a4fbb94363fa758ce0258810dea3a3217fb3"
     decision: same-version
 ```
 
