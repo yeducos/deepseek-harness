@@ -67,7 +67,7 @@ describe('Streamable HTTP session loss', () => {
       jsonResponse(sessionLost, status),
     )
     const onSessionLost = vi.fn()
-    const transport = createTransport(httpConfig, onSessionLost)
+    const transport = createTransport(httpConfig, undefined, undefined, onSessionLost)
     try {
       await transport.start()
       await transport.send(initialize)
@@ -83,7 +83,7 @@ describe('Streamable HTTP session loss', () => {
   it('does not report a 404 before any session exists', async () => {
     stubFetch(jsonResponse(sessionLost, 404))
     const onSessionLost = vi.fn()
-    const transport = createTransport(httpConfig, onSessionLost)
+    const transport = createTransport(httpConfig, undefined, undefined, onSessionLost)
     try {
       await transport.start()
       await expect(transport.send(initialize)).rejects.toThrow()
@@ -114,7 +114,7 @@ describe('Streamable HTTP session loss', () => {
       .mockRejectedValueOnce(new Error('fetch failed'))
     vi.stubGlobal('fetch', fetch)
     const onSessionLost = vi.fn()
-    const transport = createTransport(httpConfig, onSessionLost)
+    const transport = createTransport(httpConfig, undefined, undefined, onSessionLost)
     try {
       await transport.start()
       await transport.send(initialize)
@@ -129,7 +129,7 @@ describe('Streamable HTTP session loss', () => {
     const fetch = vi.fn().mockRejectedValue(new Error('fetch failed'))
     vi.stubGlobal('fetch', fetch)
     const onSessionLost = vi.fn()
-    const transport = createTransport(httpConfig, onSessionLost)
+    const transport = createTransport(httpConfig, undefined, undefined, onSessionLost)
     try {
       await transport.start()
       await expect(transport.send(initialize)).rejects.toThrow()
@@ -142,7 +142,7 @@ describe('Streamable HTTP session loss', () => {
   it('reports an HTTP 200 JSON-RPC session error without dropping the client handler', () => {
     const onSessionLost = vi.fn()
     const received: JSONRPCMessage[] = []
-    const transport = createTransport(httpConfig, onSessionLost)
+    const transport = createTransport(httpConfig, undefined, undefined, onSessionLost)
     transport.onmessage = (message) => { received.push(message) }
     watchSessionLoss(transport, onSessionLost)
 
@@ -159,7 +159,7 @@ describe('Streamable HTTP session loss', () => {
 
   it('ignores errors and results that are not session-level', () => {
     const onSessionLost = vi.fn()
-    const transport = createTransport(httpConfig, onSessionLost)
+    const transport = createTransport(httpConfig, undefined, undefined, onSessionLost)
     transport.onmessage = () => {}
     watchSessionLoss(transport, onSessionLost)
 

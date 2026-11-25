@@ -15,7 +15,7 @@
  * @module
  */
 
-import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client'
+import type { AuthProvider, FetchLike, JSONRPCMessage, Transport } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
@@ -68,12 +68,19 @@ export function watchSessionLoss(transport: Transport, onSessionLost: () => void
  * Create an MCP transport from the resolved plugin config.
  *
  * @param config - Resolved plugin config discriminated on `transport`.
+ * @param fetch - optional OAuth request wrapper that binds each request to the active grant.
+ * @param authProvider - optional passive OAuth token and refresh callbacks.
  * @param onSessionLost - Called when an HTTP session no longer exists; the
  *   Streamable HTTP transport stays open on its own, so the caller must close
  *   it to reach its reconnect path. Stdio has no session to lose.
- * @returns A connected-ready MCP Transport (stdio or Streamable HTTP).
+ * @returns an unstarted MCP transport (stdio or Streamable HTTP).
  */
-export function createTransport(config: Config, onSessionLost?: () => void): Transport {
+export function createTransport(
+  config: Config,
+  fetch?: FetchLike,
+  authProvider?: AuthProvider,
+  onSessionLost?: () => void,
+): Transport {
   switch (config.transport) {
     case 'stdio':
       return new StdioClientTransport({
@@ -89,10 +96,11 @@ export function createTransport(config: Config, onSessionLost?: () => void): Tra
       // tracking that header is enough to tell a lost session from a server
       // that was never reachable.
       let hasSession = false
-      const watchingFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const baseFetch: FetchLike = fetch ?? ((input, init) => globalThis.fetch(input, init))
+      const watchingFetch: FetchLike = async (input, init) => {
         let response: Response
         try {
-          response = await fetch(input, init)
+          response = await baseFetch(input, init)
         } catch (error) {
           // A rejected fetch means the server or the network path is gone; the
           // SDK leaves the transport superficially open, so no later request can
@@ -109,7 +117,10 @@ export function createTransport(config: Config, onSessionLost?: () => void): Tra
       }
       return new StreamableHTTPClientTransport(
         new URL(config.url),
-        { requestInit: { headers: config.headers }, fetch: watchingFetch },
+        {
+          requestInit: { headers: config.headers }, fetch: watchingFetch,
+          ...authProvider === undefined ? {} : { authProvider, onInsufficientScope: 'throw' },
+        },
       )
     }
   }
