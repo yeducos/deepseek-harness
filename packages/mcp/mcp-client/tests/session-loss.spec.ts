@@ -108,6 +108,37 @@ describe('Streamable HTTP session loss', () => {
     }
   })
 
+  it('reports a rejected fetch for an established session', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(initializeResult, 200, { 'mcp-session-id': 'session-1' }))
+      .mockRejectedValueOnce(new Error('fetch failed'))
+    vi.stubGlobal('fetch', fetch)
+    const onSessionLost = vi.fn()
+    const transport = createTransport(httpConfig, onSessionLost)
+    try {
+      await transport.start()
+      await transport.send(initialize)
+      await expect(transport.send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).rejects.toThrow()
+      expect(onSessionLost).toHaveBeenCalledTimes(1)
+    } finally {
+      await transport.close()
+    }
+  })
+
+  it('does not report a rejected fetch before any session exists', async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error('fetch failed'))
+    vi.stubGlobal('fetch', fetch)
+    const onSessionLost = vi.fn()
+    const transport = createTransport(httpConfig, onSessionLost)
+    try {
+      await transport.start()
+      await expect(transport.send(initialize)).rejects.toThrow()
+      expect(onSessionLost).not.toHaveBeenCalled()
+    } finally {
+      await transport.close()
+    }
+  })
+
   it('reports an HTTP 200 JSON-RPC session error without dropping the client handler', () => {
     const onSessionLost = vi.fn()
     const received: JSONRPCMessage[] = []

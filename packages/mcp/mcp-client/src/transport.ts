@@ -8,7 +8,9 @@
  * HTTP 200 JSON-RPC error. The MCP SDK treats neither as a transport close, so
  * the supervisor would keep calling tools against a dead session. Both signals
  * are surfaced here and reported through `onSessionLost`, which lets the
- * supervisor close the generation and run its normal reconnect policy.
+ * supervisor close the generation and run its normal reconnect policy. A fetch
+ * that rejects outright (server stopped, network path down) is reported the
+ * same way, because the SDK leaves that transport superficially open.
  *
  * @module
  */
@@ -88,7 +90,16 @@ export function createTransport(config: Config, onSessionLost?: () => void): Tra
       // that was never reachable.
       let hasSession = false
       const watchingFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-        const response = await fetch(input, init)
+        let response: Response
+        try {
+          response = await fetch(input, init)
+        } catch (error) {
+          // A rejected fetch means the server or the network path is gone; the
+          // SDK leaves the transport superficially open, so no later request can
+          // succeed until the generation is rebuilt.
+          if (hasSession && onSessionLost !== undefined) onSessionLost()
+          throw error
+        }
         if (response.headers.get('mcp-session-id') !== null) {
           hasSession = true
         } else if (hasSession && onSessionLost !== undefined && SESSION_GONE_STATUSES.has(response.status)) {
