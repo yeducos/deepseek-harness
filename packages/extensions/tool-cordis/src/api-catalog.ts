@@ -573,6 +573,67 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'chatBridgeBinder',
+    summary: 'Durable chat-bridge room bindings that wake bound Sessions.',
+    description: 'Durable chat-bridge room bindings that wake bound Sessions.\n\n`sessionPersistence` is a load-order requirement rather than a directly called service: a wake commits only when `ctx.sessions.flush()` reports that a `session/flush` listener participated, and the persistence backend providing this service is the plugin that registers that listener.',
+    methods: [
+      {
+        signature: '@Remote async list(): Promise<readonly BindingView[]>',
+        description: 'List every binding this Host holds, declared or runtime.',
+        parameters: [],
+        returns: 'bindings without room credentials, ordered by Session id.',
+      },
+      {
+        signature: '@Remote async rooms(): Promise<RoomListResult>',
+        description: 'Read the public room list for the binding form. The listing carries no credential, so it locates rooms without joining any of them.',
+        parameters: [],
+        returns: 'the public rooms, or that the room service was unreachable.',
+      },
+      {
+        signature: '@Remote endpoint(): Promise<EndpointInfo>',
+        description: 'Read the chat-bridge service address this Host loaded from its configuration.',
+        parameters: [],
+        returns: 'the effective MCP endpoint of the running plugin.',
+      },
+      {
+        signature: '@Remote async setEndpoint(request: SetEndpointRequest): Promise<SetEndpointResult>',
+        description: 'Persist a new service address into every configured profile patch row. The running plugin keeps its loaded address, so the change takes effect on the next start; no loader reload or storage write happens here.',
+        parameters: [{ name: 'request', description: 'the replacement endpoint, which must use http or https.' }],
+        returns: 'the persisted address with `restartRequired`, or the failure category.',
+      },
+      {
+        signature: '@Remote async resolve(request: ResolveRequest): Promise<ResolveResult>',
+        description: 'Turn an invite link, a room id, or a room cookie into the cookie a bind needs. Selecting a listed room and pasting an invite link both take this path; a private room answers only under a valid access key.',
+        parameters: [{ name: 'request', description: 'The room reference as entered, plus an optional access key.' }],
+        returns: 'the resolved room with its cookie, or the refusal category.',
+      },
+      {
+        signature: '@Remote async bind(request: BindRequest): Promise<BindResult>',
+        description: 'Bind one live Session to a room and start watching it. The room handshake runs before anything durable changes, so a wrong credential leaves the existing binding untouched. Without an explicit name, the name this Session last joined in this room is retried first, so re-binding keeps the same member identity.',
+        parameters: [{ name: 'request', description: 'Session, room credential, optional name and wake scope.' }],
+        returns: 'the new binding, or the refusal category.',
+      },
+      {
+        signature: '@Remote async unbind(request: UnbindRequest): Promise<UnbindResult>',
+        description: 'Remove one runtime binding and stop watching its room.',
+        parameters: [{ name: 'request', description: 'Session whose runtime binding is removed.' }],
+        returns: 'whether a row was removed, or that declarations own the binding.',
+      },
+      {
+        signature: '@Remote async leave(request: LeaveRequest): Promise<LeaveResult>',
+        description: 'Remove the bound member from its room and keep the binding. The Session stops receiving room messages until it rejoins; polling stops first so the loop cannot race the leave with a fresh apply for a name.',
+        parameters: [{ name: 'request', description: 'Session whose bound member leaves its room.' }],
+        returns: 'whether the member left, was already gone, or the room was unreachable.',
+      },
+      {
+        signature: '@Remote async rejoin(request: RejoinRequest): Promise<RejoinResult>',
+        description: 'Re-enter the room of a binding whose member left. The join handshake runs first, then the cursor resets to the room\'s current backlog so re-entering does not replay messages missed while away.',
+        parameters: [{ name: 'request', description: 'Session whose binding re-enters, plus a fresh private-room key.' }],
+        returns: 'the active binding, or the refusal category.',
+      },
+    ],
+  },
+  {
     key: 'claudeCodeMods',
     summary: 'The bridge service: loaded mods, their hooks, and the harness listeners that raise their events.',
     description: 'The bridge service: loaded mods, their hooks, and the harness listeners that raise their events. Mods join through ClaudeCodeMods.add, which defineMod calls when a mod plugin mounts. The Remote methods let a Client draw each session\'s band above the prompt and press its buttons.',
@@ -6715,8 +6776,32 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BashEnvVariableInfo extends BashEnvVariable {\n    contributor: string;\n    key: DshEnvironmentKey;\n}',
   },
   {
+    name: 'BindFailureCode',
+    declaration: 'export type BindFailureCode = \'session-unknown\' | \'invalid-cookie\' | \'invalid-name\' | \'declared-binding\' | \'room-unreachable\' | \'room-rejected\';',
+  },
+  {
     name: 'BindingOrigin',
     declaration: 'export type BindingOrigin = \'created\' | \'referenced\' | \'discovered\' | \'tracked\';',
+  },
+  {
+    name: 'BindingSource',
+    declaration: 'export type BindingSource = \'declared\' | \'runtime\';',
+  },
+  {
+    name: 'BindingStatus',
+    declaration: 'export type BindingStatus = \'active\' | \'stopped\' | \'left\';',
+  },
+  {
+    name: 'BindingView',
+    declaration: 'export interface BindingView {\n    readonly sessionId: string;\n    readonly agentName: string;\n    readonly roomName?: string;\n    readonly since: number;\n    readonly status: BindingStatus;\n    readonly wake: WakeMode;\n    readonly source: BindingSource;\n    readonly roomUrl: string;\n}',
+  },
+  {
+    name: 'BindRequest',
+    declaration: 'export interface BindRequest {\n    readonly sessionId: string;\n    readonly cookie: string;\n    readonly agentName?: string;\n    readonly accessKey?: string;\n    readonly wake?: WakeMode;\n}',
+  },
+  {
+    name: 'BindResult',
+    declaration: 'export type BindResult = {\n    readonly ok: true;\n    readonly binding: BindingView;\n} | {\n    readonly ok: false;\n    readonly code: BindFailureCode;\n};',
   },
   {
     name: 'BoxProps',
@@ -7493,6 +7578,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EncodedImageAttachment',
     declaration: 'export interface EncodedImageAttachment {\n    mediaType: ImageMediaType;\n    data: string;\n    name?: string;\n}',
+  },
+  {
+    name: 'EndpointInfo',
+    declaration: 'export interface EndpointInfo {\n    readonly url: string;\n}',
   },
   {
     name: 'EnteredWorktree',
@@ -8301,6 +8390,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KvUnitDescriptor',
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n    readonly layout?: \'single\' | \'per-record\';\n    readonly compatibleVersions?: readonly number[];\n}',
+  },
+  {
+    name: 'LeaveRequest',
+    declaration: 'export interface LeaveRequest {\n    readonly sessionId: string;\n}',
+  },
+  {
+    name: 'LeaveResult',
+    declaration: 'export type LeaveResult = {\n    readonly ok: true;\n} | {\n    readonly ok: false;\n    readonly code: \'session-unknown\' | \'not-bound\' | \'room-unreachable\';\n};',
   },
   {
     name: 'ListVersionsOptions',
@@ -9351,10 +9448,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type RecommendationDetails = {\n    readonly status: \'available\';\n    readonly title: LocalizedText;\n    readonly description: LocalizedText;\n    readonly enabled: boolean;\n} | {\n    readonly status: \'refused\';\n    readonly reason: \'unknown\' | \'unavailable\' | \'not-live-root\' | \'closing\';\n};',
   },
   {
-    name: 'ReconnectConfig',
-    declaration: 'export interface ReconnectConfig {\n    enabled?: boolean;\n    initialDelayMs?: number;\n    maxDelayMs?: number;\n    maxAttempts?: number;\n}',
-  },
-  {
     name: 'RecurringScheduleRecord',
     declaration: 'export type RecurringScheduleRecord = EveryScheduleRecord | DailyScheduleRecord | WeeklyScheduleRecord | CronScheduleRecord | RRuleScheduleRecord;',
   },
@@ -9369,6 +9462,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RegistryAttempt',
     declaration: 'export interface RegistryAttempt {\n    readonly registry: Registry;\n    readonly problem?: \'not-found\' | \'network\' | \'unknown\';\n    readonly reason?: string;\n}',
+  },
+  {
+    name: 'RejoinFailureCode',
+    declaration: 'export type RejoinFailureCode = \'session-unknown\' | \'not-bound\' | \'not-left\' | \'room-unreachable\' | \'room-rejected\';',
+  },
+  {
+    name: 'RejoinRequest',
+    declaration: 'export interface RejoinRequest {\n    readonly sessionId: string;\n    readonly accessKey?: string;\n}',
+  },
+  {
+    name: 'RejoinResult',
+    declaration: 'export type RejoinResult = {\n    readonly ok: true;\n    readonly binding: BindingView;\n} | {\n    readonly ok: false;\n    readonly code: RejoinFailureCode;\n};',
   },
   {
     name: 'RelayConnectivityView',
@@ -9543,12 +9648,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ResolvedRetryPolicy = ResolvedNormalRetryPolicy | ResolvedAlwaysRetryPolicy;',
   },
   {
+    name: 'ResolvedRoom',
+    declaration: 'export interface ResolvedRoom {\n    readonly roomId: string;\n    readonly name: string;\n    readonly roomType: \'public\' | \'private\';\n    readonly cookie: string;\n    readonly accessKey?: string;\n}',
+  },
+  {
     name: 'ResolvedSubagentStartRequest',
     declaration: 'export interface ResolvedSubagentStartRequest extends SubagentStartRequest {\n    readonly cwd: string;\n}',
   },
   {
     name: 'ResolvedToolSet',
     declaration: 'export interface ResolvedToolSet {\n    dispose(): void;\n    view(scope: ScopeKey | undefined): ReadonlyMap<string, ToolDefinition>;\n}',
+  },
+  {
+    name: 'ResolveFailureCode',
+    declaration: 'export type ResolveFailureCode = \'invalid-value\' | \'room-unknown\' | \'room-private\' | \'room-unreachable\' | \'resolution-unsupported\';',
+  },
+  {
+    name: 'ResolveRequest',
+    declaration: 'export interface ResolveRequest {\n    readonly value: string;\n    readonly accessKey?: string;\n}',
+  },
+  {
+    name: 'ResolveResult',
+    declaration: 'export type ResolveResult = {\n    readonly ok: true;\n    readonly room: ResolvedRoom;\n} | {\n    readonly ok: false;\n    readonly code: ResolveFailureCode;\n};',
   },
   {
     name: 'RestartReason',
@@ -9577,6 +9698,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReviewVerdict',
     declaration: 'export type ReviewVerdict = \'approved\' | \'changes-requested\' | \'commented\' | \'dismissed\';',
+  },
+  {
+    name: 'RoomListResult',
+    declaration: 'export type RoomListResult = {\n    readonly ok: true;\n    readonly rooms: readonly RoomSummary[];\n} | {\n    readonly ok: false;\n    readonly code: \'room-unreachable\';\n};',
+  },
+  {
+    name: 'RoomSummary',
+    declaration: 'export interface RoomSummary {\n    readonly roomId: string;\n    readonly name: string;\n    readonly members: number;\n    readonly messages: number;\n}',
   },
   {
     name: 'RpcId',
@@ -10441,6 +10570,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionWorkspacePathApplication',
     declaration: 'export type SessionWorkspacePathApplication = NativeFileApplication;',
+  },
+  {
+    name: 'SetEndpointFailureCode',
+    declaration: 'export type SetEndpointFailureCode = \'invalid-url\' | \'profile-unavailable\' | \'row-missing\' | \'write-failed\';',
+  },
+  {
+    name: 'SetEndpointRequest',
+    declaration: 'export interface SetEndpointRequest {\n    readonly url: string;\n}',
+  },
+  {
+    name: 'SetEndpointResult',
+    declaration: 'export type SetEndpointResult = {\n    readonly ok: true;\n    readonly url: string;\n    readonly restartRequired: true;\n} | {\n    readonly ok: false;\n    readonly code: SetEndpointFailureCode;\n};',
   },
   {
     name: 'SetRelayRequest',
@@ -11539,6 +11680,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type UiRenderResult = UiNode;',
   },
   {
+    name: 'UnbindRequest',
+    declaration: 'export interface UnbindRequest {\n    readonly sessionId: string;\n}',
+  },
+  {
+    name: 'UnbindResult',
+    declaration: 'export type UnbindResult = {\n    readonly ok: true;\n    readonly removed: boolean;\n} | {\n    readonly ok: false;\n    readonly code: \'declared-binding\';\n};',
+  },
+  {
     name: 'UpdateBundleOptions',
     declaration: 'export interface UpdateBundleOptions {\n    readonly registry?: Registry;\n    readonly spec?: string;\n    readonly requestId?: PluginInstallRequestId;\n}',
   },
@@ -11585,6 +11734,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ViewerPluginPolicy',
     declaration: 'export interface ViewerPluginPolicy {\n    readonly plugin: string;\n    readonly mode: \'all\' | \'none\' | \'selected\';\n    readonly endpoints?: readonly string[];\n}',
+  },
+  {
+    name: 'WakeMode',
+    declaration: 'export type WakeMode = \'idle-only\' | \'always\';',
   },
   {
     name: 'WebAdmission',

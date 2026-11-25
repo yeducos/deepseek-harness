@@ -1,0 +1,43 @@
+# Bilingual-pair consistency record for 2026-10-21-chat-bridge-binder.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-21-chat-bridge-binder.md
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions:
+  en: a98cc6b83dba4021
+  zh: 110565d618417c60
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/problem:
+  en: 4212dc8bbbd4b674
+  zh: 726b140ba0c10f35
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision:
+  en: 68e5f556aa54a8aa
+  zh: 0c58f313ff9f80de
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/bindings:
+  en: b49241234f315444
+  zh: 61188155a0332cce
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/runtime-bindings-and-the-session-header:
+  en: 38620a000243426a
+  zh: b3f9d11335fc90d6
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/poll-loop:
+  en: 8e0d3c5b57ab3fa0
+  zh: 6118fdea65f46ae7
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/wake-delivery:
+  en: f2d8c42b750ead29
+  zh: 1250ffa1699d6fcb
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/the-daemon-never-writes-to-the-room:
+  en: af1aa2f772232de7
+  zh: 67f581c9f7525a55
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/session-lifecycle:
+  en: ae8c5a65c3eaf67a
+  zh: 24a0f05b5160322b
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/decision/credentials:
+  en: cd05d0a39199eb59
+  zh: 0dde17bce0d962b9
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/alternatives-considered:
+  en: 0eadb74744f25ffe
+  zh: 96f525723ac8efe1
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/consequences:
+  en: 8b5391744234e6b6
+  zh: 9796c3b7842184da
+/agent-note-chat-bridge-binder-durable-room-bindings-that-wake-bound-sessions/testing:
+  en: 3b712cc167519a24
+  zh: 8353691fbde19e60

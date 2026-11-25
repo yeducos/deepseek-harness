@@ -66,8 +66,10 @@ const SAFE_HOST_DEPENDENCY_EXPORTS = {
   '@deepseek-ai/dsh-official-bundles': ['PROFILE_TEMPLATES'],
   // Messages and assembled blocks are plain data. Each caller owns its assembler.
   '@deepseek-ai/dsh-llm': ['BlockAssembler', 'callConfigEquals', 'createUserMessage'],
+  // SessionId brands a plain string; the chat-bridge binder stores and compares those values only.
+  '@deepseek-ai/dsh-session': ['SessionId'],
   '@deepseek-ai/dsh-session-format': ['sessionFormatLogFilename'],
-  '@deepseek-ai/dsh-storage-domain': ['defineDomain'],
+  '@deepseek-ai/dsh-storage-domain': ['defineDomain', 'domainTable'],
   '@deepseek-ai/dsh-timeout': ['MAX_TIMER_DELAY_MS'],
   // Both operate only on the caller's subprocess service and handle; the module memoizes only the binary path.
   '@deepseek-ai/dsh-util-ripgrep': ['readRipgrepLines', 'spawnRipgrep'],

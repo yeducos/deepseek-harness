@@ -24,8 +24,9 @@ import type { Config } from '@deepseek-ai/dsh-mcp-client'
 // class must be created inside vi.hoisted to exist when the factories run.
 const {
   mockConnect, mockClose,
-  mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances,
+  mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances, httpTransports,
 } = vi.hoisted(() => {
+  const httpTransports: Transport[] = []
   const mockConnect = vi.fn<() => Promise<void>>()
   const mockClose = vi.fn<() => Promise<void>>()
   const mockListTools = vi.fn<(_params?: Record<string, unknown>) => Promise<unknown>>()
@@ -57,7 +58,7 @@ const {
   const instances: MockClient[] = []
   return {
     mockConnect, mockClose,
-    mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances,
+    mockListTools, mockCallTool, mockSetNotificationHandler, MockClient, instances, httpTransports,
   }
 })
 
@@ -65,12 +66,15 @@ vi.mock('@modelcontextprotocol/client', async importOriginal => ({
   ...await importOriginal<typeof import('@modelcontextprotocol/client')>(),
   Client: MockClient,
   StreamableHTTPClientTransport: vi.fn(function () {
-    return {
-      onclose: undefined as (() => void) | undefined,
+    const transport: Transport = {
+      onclose: undefined,
+      onmessage: undefined,
       start: () => Promise.resolve(),
       send: () => Promise.resolve(),
       close() { this.onclose?.(); return Promise.resolve() },
     }
+    httpTransports.push(transport)
+    return transport
   }),
 }))
 
@@ -142,8 +146,21 @@ function stdioConfig(reconnect?: Config['reconnect']): Config {
   })
 }
 
-/** The tool list the mock server advertises after a successful (re)connect. */
-function listing(...names: string[]): { tools: { name: string; inputSchema: { type: string } }[]; nextCursor: undefined } {
+/** Same supervisor budget as `stdioConfig`, transported over Streamable HTTP. */
+function httpConfig(reconnect?: Config['reconnect']): Config {
+  return ConfigSchema({
+    transport: 'streamable-http',
+    serverName: 'srv',
+    url: 'http://127.0.0.1:9/mcp',
+    headers: {},
+    toolCallTimeoutMs: 60_000,
+    startupTimeoutMs: 30_000,
+    failOnStartupError: false,
+    ...reconnect === undefined ? {} : { reconnect },
+  })
+}
+
+/** The tool list the mock server advertises after a successful (re)connect. */function listing(...names: string[]): { tools: { name: string; inputSchema: { type: string } }[]; nextCursor: undefined } {
   return {
     tools: names.map(name => ({ name, inputSchema: { type: 'object' } })),
     nextCursor: undefined,
@@ -163,6 +180,7 @@ describe('reconnect supervisor', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     instances.length = 0
+    httpTransports.length = 0
     mockConnect.mockResolvedValue(undefined)
     mockClose.mockImplementation(function (this: { transport?: Transport }) {
       this.transport?.onclose?.()
@@ -431,6 +449,23 @@ describe('reconnect supervisor', () => {
     instances[0]!.transport?.onclose?.()
     await sleep(30)
     expect(instances).toHaveLength(2)
+  })
+
+  it('rebuilds the generation when the server reports the HTTP session lost', async () => {
+    const { warns } = captureLogs(ctx)
+    await apply(ctx, httpConfig({ initialDelayMs: 5, maxDelayMs: 40, maxAttempts: 5 }))
+    await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
+    expect(httpTransports).toHaveLength(1)
+    expect(httpTransports[0]!.onmessage).toBeDefined()
+
+    // A restarted server answers `Session not found` without closing the
+    // transport, so only the observer can start the rebuild.
+    httpTransports[0]!.onmessage?.({
+      jsonrpc: '2.0', id: 'server-error', error: { code: -32600, message: 'Session not found' },
+    })
+
+    await vi.waitFor(() => { expect(instances).toHaveLength(2) })
+    expect(warns.some(line => line.includes('reconnecting in 5ms (attempt 1/5)'))).toBe(true)
   })
 
   it('a startup listing that outlives the budget publishes no tools', async () => {

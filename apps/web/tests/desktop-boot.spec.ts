@@ -32,6 +32,30 @@ it('forwards client initialization failures to native recovery', async () => {
   expect(failed).toHaveBeenCalledWith('client plugin activation failed')
 })
 
+it('routes client-hmr events through page fetch on the desktop carrier', async () => {
+  document.body.innerHTML = '<div id="root"></div>'
+  const gate = Promise.withResolvers<undefined>()
+  vi.stubGlobal('__DSH_BOOT_READY__', gate)
+  vi.stubGlobal('dshDesktopBoot', { ready: async () => ({ injections: [], streamBaseUrl: 'http://127.0.0.1:3080' }), failed: vi.fn() })
+  vi.stubGlobal('__DSH_TRANSPORT__', undefined)
+  await import('../src/main.ts')
+  await gate.promise
+  const transport = (globalThis as {
+    __DSH_TRANSPORT__?: {
+      ownsHost: boolean
+      streamBaseUrl: string
+      fetch(input: string, init: RequestInit): Promise<Response>
+    }
+  }).__DSH_TRANSPORT__
+  expect(transport).toMatchObject({ ownsHost: true, streamBaseUrl: 'http://127.0.0.1:3080' })
+  const response = new Response('data: {}\n\n')
+  const pageFetch = vi.fn(async () => response)
+  vi.stubGlobal('fetch', pageFetch)
+  const init: RequestInit = { headers: { accept: 'text/event-stream' } }
+  await expect(transport!.fetch('plugins/events', init)).resolves.toBe(response)
+  expect(pageFetch).toHaveBeenCalledWith('plugins/events', init)
+})
+
 it('rejects the shared boot wait when the Desktop Host cannot start', async () => {
   document.body.innerHTML = '<div id="root"></div>'
   const gate = Promise.withResolvers<undefined>()

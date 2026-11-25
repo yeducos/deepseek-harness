@@ -137,6 +137,10 @@ After a committed management change, Schedule queues a best-effort notice to eac
 
 Historical version-1 `schedule/change` events retain the frozen `LegacyScheduleRecord` types: `after`, `at`, and `every`, including old optional titles. They remain recorded Session data without a Schedule interpreter, warning hook, importer, or timer. Existing Host tasks in `schedule.json` still use the normal decoder and evaluator.
 
+## Chat-bridge room bindings
+
+`ctx.chatBridgeBinder` applies the same idle-Session delivery to an external chat-bridge room. A binding row in the `chat_bridge_binder` storage domain holds the bound Session, the room cookie, the joined agent name, and the last processed message id; each active binding keeps one MCP long-poll request open. The default `wake: idle-only` delivers every message the room makes visible to the member and ends the binding when the Session stops, while `wake: always` delivers only messages addressed to the joined member and keeps polling across a local stop. Delivery resumes the Session through the Session controller and enters the inbox as one user-role message whose source kind is `chat-bridge`, and the stored cursor advances only after `flush` acknowledges persistence, so a crash repeats the batch rather than losing it. The binder only reads the room: replies travel through the agent's own chat-bridge tools. The [package README](../../packages/experimental/chat-bridge-binder/README.md) owns composition, configuration, and the delivered framing.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -144,6 +148,91 @@ Historical version-1 `schedule/change` events retain the frozen `LegacyScheduleR
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxchatbridgebinder--chatbridgebinderservice"></a>
+
+### `ctx.chatBridgeBinder` — `ChatBridgeBinderService`
+
+Durable chat-bridge room bindings that wake bound Sessions.
+
+`sessionPersistence` is a load-order requirement rather than a directly called service: a wake commits only when `ctx.sessions.flush()` reports that a `session/flush` listener participated, and the persistence backend providing this service is the plugin that registers that listener.
+
+```ts cordis-catalog
+/**
+ * List every binding this Host holds, declared or runtime.
+ * @returns bindings without room credentials, ordered by Session id.
+ */
+@Remote async list(): Promise<readonly BindingView[]>
+
+/**
+ * Read the public room list for the binding form. The listing carries no
+ * credential, so it locates rooms without joining any of them.
+ * @returns the public rooms, or that the room service was unreachable.
+ */
+@Remote async rooms(): Promise<RoomListResult>
+
+/**
+ * Read the chat-bridge service address this Host loaded from its configuration.
+ * @returns the effective MCP endpoint of the running plugin.
+ */
+@Remote endpoint(): Promise<EndpointInfo>
+
+/**
+ * Persist a new service address into every configured profile patch row. The
+ * running plugin keeps its loaded address, so the change takes effect on the
+ * next start; no loader reload or storage write happens here.
+ * @param request - the replacement endpoint, which must use http or https.
+ * @returns the persisted address with `restartRequired`, or the failure category.
+ */
+@Remote async setEndpoint(request: SetEndpointRequest): Promise<SetEndpointResult>
+
+/**
+ * Turn an invite link, a room id, or a room cookie into the cookie a bind
+ * needs. Selecting a listed room and pasting an invite link both take this
+ * path; a private room answers only under a valid access key.
+ * @param request - The room reference as entered, plus an optional access key.
+ * @returns the resolved room with its cookie, or the refusal category.
+ */
+@Remote async resolve(request: ResolveRequest): Promise<ResolveResult>
+
+/**
+ * Bind one live Session to a room and start watching it. The room handshake
+ * runs before anything durable changes, so a wrong credential leaves the
+ * existing binding untouched. Without an explicit name, the name this
+ * Session last joined in this room is retried first, so re-binding keeps the
+ * same member identity.
+ * @param request - Session, room credential, optional name and wake scope.
+ * @returns the new binding, or the refusal category.
+ */
+@Remote async bind(request: BindRequest): Promise<BindResult>
+
+/**
+ * Remove one runtime binding and stop watching its room.
+ * @param request - Session whose runtime binding is removed.
+ * @returns whether a row was removed, or that declarations own the binding.
+ */
+@Remote async unbind(request: UnbindRequest): Promise<UnbindResult>
+
+/**
+ * Remove the bound member from its room and keep the binding. The Session
+ * stops receiving room messages until it rejoins; polling stops first so the
+ * loop cannot race the leave with a fresh apply for a name.
+ * @param request - Session whose bound member leaves its room.
+ * @returns whether the member left, was already gone, or the room was unreachable.
+ */
+@Remote async leave(request: LeaveRequest): Promise<LeaveResult>
+
+/**
+ * Re-enter the room of a binding whose member left. The join handshake runs
+ * first, then the cursor resets to the room's current backlog so re-entering
+ * does not replay messages missed while away.
+ * @param request - Session whose binding re-enters, plus a fresh private-room key.
+ * @returns the active binding, or the refusal category.
+ */
+@Remote async rejoin(request: RejoinRequest): Promise<RejoinResult>
+```
+
+Source: [`packages/experimental/chat-bridge-binder/src/index.ts`](../../packages/experimental/chat-bridge-binder/src/index.ts)
 
 <a id="ctxschedule--scheduleservice"></a>
 

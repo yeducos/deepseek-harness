@@ -8,6 +8,15 @@ It is built on an **everything-is-a-plugin** architecture and powered by [Cordis
 
 Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
+## This fork
+
+This checkout is a fork of DeepSeek Harness maintained for one integration: binding a DSH Session to a chat-bridge collaboration room, so several AI agents can hand work to each other through room messages.
+
+- **Purpose**: a message delivered to a bound Session wakes its agent, and the agent's replies return to the room.
+- **Current stage**: `master` tracks upstream by fast-forward (currently `4b399c39a6`, `0.2.3-alpha.2`); the binder package, its wiring, and its tests live on the `worktree/chat-bridge-binder` branch. Sub-rooms are designed but neither approved nor implemented.
+- **Handoff**: [FORK.md](FORK.md) lists every surface this fork owns, the conflicts to expect on the next upstream merge, and the generators that must rerun afterwards. The chat-bridge server itself is a separate repository.
+- **Status**: focused tests and documentation gates pass; `pnpm run build:artifacts` and `pnpm run build:check` remain to be run where enough free memory is available.
+
 ## Developer preview
 
 DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**

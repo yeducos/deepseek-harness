@@ -3,7 +3,7 @@
 import type { AuthProvider, Client, FetchLike, Transport } from '@modelcontextprotocol/client'
 import { withDeadline } from './deadline.ts'
 import { McpLocalError } from './diagnostic.ts'
-import { createTransport } from './transport.ts'
+import { createTransport, watchSessionLoss } from './transport.ts'
 import type { Config } from './index.ts'
 import type { McpCloseResult } from './types.ts'
 
@@ -37,7 +37,7 @@ export class McpGeneration {
     const transport = this.transport = createTransport(config, fetch, authProvider === undefined ? undefined : {
       token: () => this.run(() => authProvider.token()),
       onUnauthorized: context => this.run(() => authProvider.onUnauthorized(context)),
-    })
+    }, this.sessionLost)
     const close = transport.close.bind(transport)
     let closing: Promise<void> | undefined
     transport.close = () => closing ??= close()
@@ -56,7 +56,18 @@ export class McpGeneration {
         ...timeoutMs === undefined ? {} : { timeout: Math.max(1, timeoutMs) },
       })
       this.assertOpen()
+      watchSessionLoss(transport, this.sessionLost)
     }, timeoutMs)
+  }
+
+  /**
+   * Rebuild the connection when the server no longer knows this transport's
+   * session. Closing the client mirrors a transport-initiated close, so the
+   * supervisor's own loss path owns cleanup and reconnection; closing this
+   * generation instead would abort its lifetime and hide the loss.
+   */
+  private readonly sessionLost = (): void => {
+    void this.client.close().catch(() => undefined)
   }
 
   /** Reject when this generation was cancelled or its transport reported closure. */
