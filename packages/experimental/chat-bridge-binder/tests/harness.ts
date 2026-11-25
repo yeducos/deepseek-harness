@@ -5,6 +5,7 @@ import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import type { CreateSessionOptions } from '@deepseek-ai/dsh-session'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -63,6 +64,7 @@ export async function harness(options: {
   const ctx = new Context()
   options.onContext?.(ctx)
   await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjections)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
@@ -98,5 +100,4 @@ export async function harness(options: {
     return { ctx, service, agent, resolve, flush, fiber: ctx.fiber, pool }
   }
   const fiber = await ctx.plugin(ChatBridgeBinderService, options.config)
-  return { ctx, service: ctx.chatBridgeBinder, agent, resolve, flush, fiber, pool }
-}
+  return { ctx, service: ctx.chatBridgeBinder, agent, resolve, flush, fiber, pool }}

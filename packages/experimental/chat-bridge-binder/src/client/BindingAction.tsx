@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactElement } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Button, IconChevronDownOutlineRegular, IconRefreshOutlineRegular, MenuSurface,
-  useAnchoredPosition, useDismissOnOutsidePointer,
+  useDismissOnOutsidePointer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
@@ -53,15 +53,6 @@ export type BindingActionProps =
   PropsRuntime<'conversation.session.header.actions'>
   & PropsLocale<typeof NS>
   & InjectFace<BindingActionInjected>
-
-/** Distance between the trigger's bottom edge and the popover. */
-const MENU_GAP = 5
-
-/** Minimum gap kept between the popover and the viewport edges. */
-const VIEWPORT_MARGIN = 12
-
-/** Unplaced popover: hidden but laid out so the first placement measures real dimensions. */
-const MEASURE_STYLE: CSSProperties = { visibility: 'hidden', left: 0, top: 0 }
 
 /** Refusal codes that carry their own localized copy. */
 const FAILURE_COPY = {
@@ -191,9 +182,7 @@ export function BindingAction({
     // `endpoint` is an injected operation fixed for the plugin lifetime; `t` rebinds only with the locale.
   }, [open, endpoint, t])
 
-  const menuPosition = useAnchoredPosition({
-    open, anchorRef: rootRef, panelRef: menuRef, gap: MENU_GAP, margin: VIEWPORT_MARGIN,
-  })
+  const anchorName = `--dsh-chat-bridge-${useId().replaceAll(':', '')}`
   useDismissOnOutsidePointer(rootRef, open, setOpen, menuRef)
 
   // The secondary form takes focus only once the user asks for it; the room list stays primary.
@@ -396,7 +385,7 @@ export function BindingAction({
   )
 
   return (
-    <div ref={rootRef} onKeyDown={onKeyDown}>
+    <div ref={rootRef} style={{ anchorName }} onKeyDown={onKeyDown}>
       <button
         ref={triggerRef}
         type="button"
@@ -410,7 +399,7 @@ export function BindingAction({
       </button>
       {open
         ? createPortal(
-          <MenuSurface ref={menuRef} className={css.menu} style={menuPosition ?? MEASURE_STYLE}>
+          <MenuSurface ref={menuRef} className={css.menu} style={{ positionAnchor: anchorName }}>
             <div className={css.header}>
               <div className={css.title} title={t('description')}>
                 {binding === null || binding === undefined ? t('title') : t('title.bound')}

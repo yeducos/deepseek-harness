@@ -33,6 +33,15 @@
    below modal overlays (1000). */
 .menu {
   position: fixed;
+  position-area: none;
+  top: max(12px, calc(anchor(bottom) + 5px));
+  bottom: 12px;
+  left: max(12px, anchor(left));
+  position-try-fallbacks: --dsh-chat-bridge-above, --dsh-chat-bridge-window;
+  align-self: start;
+  justify-self: start;
+  height: fit-content;
+  margin: 0;
   z-index: 100;
   box-sizing: border-box;
   display: flex;
@@ -43,6 +52,21 @@
   padding: 14px;
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent);
+}
+
+@position-try --dsh-chat-bridge-above {
+  top: max(12px, var(--dsh-frame-overlay-top, 12px));
+  bottom: max(12px, calc(anchor(top) + 5px));
+  align-self: end;
+}
+
+@position-try --dsh-chat-bridge-window {
+  top: max(12px, var(--dsh-frame-overlay-top, 12px));
+  bottom: 12px;
+  left: 12px;
+  right: 12px;
+  align-self: start;
+  justify-self: start;
 }
 
 .header {

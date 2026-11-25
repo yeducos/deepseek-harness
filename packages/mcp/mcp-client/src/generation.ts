@@ -62,11 +62,12 @@ export class McpGeneration {
 
   /**
    * Rebuild the connection when the server no longer knows this transport's
-   * session. The Streamable HTTP transport keeps running after such an error, so
-   * closing this generation is the only way to reach the reconnect path.
+   * session. Closing the client mirrors a transport-initiated close, so the
+   * supervisor's own loss path owns cleanup and reconnection; closing this
+   * generation instead would abort its lifetime and hide the loss.
    */
   private readonly sessionLost = (): void => {
-    void this.close(new McpLocalError('MCP session lost', 'MCP_CONNECTION_CLOSED'))
+    void this.client.close().catch(() => undefined)
   }
 
   /** Reject when this generation was cancelled or its transport reported closure. */

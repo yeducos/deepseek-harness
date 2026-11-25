@@ -456,6 +456,7 @@ describe('reconnect supervisor', () => {
     await apply(ctx, httpConfig({ initialDelayMs: 5, maxDelayMs: 40, maxAttempts: 5 }))
     await vi.waitFor(() => { expect(ctx.tools.get('mcp__srv__remote')).toBeDefined() })
     expect(httpTransports).toHaveLength(1)
+    expect(httpTransports[0]!.onmessage).toBeDefined()
 
     // A restarted server answers `Session not found` without closing the
     // transport, so only the observer can start the rebuild.

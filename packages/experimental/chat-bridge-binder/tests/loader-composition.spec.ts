@@ -9,6 +9,7 @@ import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionStore from '@deepseek-ai/dsh-session'
+import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -33,6 +34,7 @@ afterEach(async () => {
 /** Provide the Session, Agent, and durable-storage services the binder injects. */
 async function provideHostServices(ctx: Context): Promise<HarnessAgent> {
   await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjections)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(Storage)
   const pool = new MemoryMediaPool()
