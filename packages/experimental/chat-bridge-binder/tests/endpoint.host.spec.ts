@@ -56,7 +56,7 @@ async function tempProfile(source: string): Promise<ProfileContext> {
     cwd: root,
     home: dirname(patchPath),
     startedBundles: [],
-    overlays: [],
+    overlayPaths: [],
     telemetryDisabledEnv: undefined,
   }
 }

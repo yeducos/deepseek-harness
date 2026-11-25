@@ -15,7 +15,11 @@ const httpConfig: Config = {
   url: 'http://127.0.0.1:9/mcp',
   headers: {},
   toolCallTimeoutMs: 5_000,
+  closeTimeoutMs: 5_000,
+  expandTemplates: false,
   failOnStartupError: false,
+  toolLoading: 'eager',
+  catalogDescriptionMaxLength: 160,
 }
 
 const initialize: JSONRPCMessage = {
