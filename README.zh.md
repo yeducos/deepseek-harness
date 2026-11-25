@@ -8,6 +8,15 @@ DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的�
 
 文档：[https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
 
+## 本 fork
+
+本仓库是 DeepSeek Harness 的 fork，只为一个集成目标服务：把 DSH Session 绑定到 chat-bridge 协作房间，让多个 AI 之间通过房间消息交接工作。
+
+- **目的**：投递到已绑定 Session 的消息会唤醒对应 agent，agent 的回复再回到房间。
+- **当前阶段**：`master` 以 fast-forward 跟踪上游（当前 `4b399c39a6`，`0.2.3-alpha.2`）；binder 包、接线与测试位于 `worktree/chat-bridge-binder` 分支。小房间方案已设计，但未评审通过、未实施。
+- **交接入口**：[FORK.md](FORK.md) 列出本 fork 独占的每一处改动、下次合并上游时的冲突点，以及合并后必须重跑的生成器。chat-bridge 服务端在另一个仓库。
+- **状态**：聚焦测试与文档 gate 已通过；`pnpm run build:artifacts` 与 `pnpm run build:check` 仍需在空闲内存充足的环境补跑。
+
 ## 开发者预览
 
 DeepSeek Harness 处于 _开发者预览_ 阶段，正在快速迭代。**未来将出现破坏兼容性的变更。**
